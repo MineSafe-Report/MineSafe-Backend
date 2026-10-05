@@ -1,0 +1,11 @@
+CREATE TABLE Locations (
+    LocationID INT IDENTITY(1,1) NOT NULL,
+    LocationName NVARCHAR(100) NOT NULL,
+    LocationCode NVARCHAR(50) NOT NULL,
+    LocationInfo NVARCHAR(255) NULL,
+    IsActive BIT NOT NULL DEFAULT (1),
+    CreatedAt DATETIME2(0) NOT NULL DEFAULT (SYSUTCDATETIME()),
+    UpdatedAt DATETIME2(0) NULL,
+
+    CONSTRAINT PK_Locations PRIMARY KEY (LocationID)
+);
