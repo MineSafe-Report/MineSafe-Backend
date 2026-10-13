@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    The project file. It tells .NET what kind of app this is (a web app),
+    which .NET version to use, and which extra libraries (NuGet packages) we need.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>MineSafety.Api</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Lets the API read and check JWT tokens sent by the app -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.0" />
+    <!-- EF Core: lets us talk to SQL Server using C# instead of writing SQL -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="9.0.0" />
+    <!-- Swagger: generates the test page at /swagger -->
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="7.2.0" />
+  </ItemGroup>
+
+</Project>
