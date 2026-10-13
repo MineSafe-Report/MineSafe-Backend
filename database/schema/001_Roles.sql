@@ -3,5 +3,6 @@ CREATE TABLE Roles (
     RoleName NVARCHAR(50) NOT NULL,
     Description NVARCHAR(255) NULL,
 
-    CONSTRAINT PK_Roles PRIMARY KEY (RoleID)
+    CONSTRAINT PK_Roles PRIMARY KEY (RoleID),
+    CONSTRAINT UQ_Roles_RoleName UNIQUE (RoleName)
 );
