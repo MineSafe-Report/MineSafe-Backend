@@ -14,19 +14,27 @@ var builder = WebApplication.CreateBuilder(args);
 
 // ---------- 1. REGISTER SERVICES ----------
 
-// Database: use SQL Server with the connection string from appsettings.json
+// Database: SQL Server, using the connection string from appsettings.
+// The tables must ALREADY exist (created by Michael's scripts, see scripts/create-local-db.ps1).
 builder.Services.AddDbContext<MineSafetyDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("MineSafetyDb")));
 
 // Our own services. "Scoped" = one fresh instance per request.
-// When a controller asks for ILocationService, ASP.NET gives it a LocationService.
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IAccessService, AccessService>();
 builder.Services.AddScoped<ILocationService, LocationService>();
 builder.Services.AddScoped<IAccountService, AccountService>();
 
-// Authentication: "every request may carry a JWT token; here's how to check it's genuine"
+// The JWT signing key is a secret, so it is NOT in appsettings.json (which is committed).
+// In development it comes from appsettings.Development.json; anywhere else, from an
+// environment variable called Jwt__Key. No key = the app refuses to start.
 var jwt = builder.Configuration.GetSection("Jwt");
+var jwtKey = jwt["Key"];
+if (string.IsNullOrWhiteSpace(jwtKey) || jwtKey.Length < 32)
+    throw new InvalidOperationException("Jwt:Key is missing or shorter than 32 characters.");
+
+// Authentication: "every request may carry a JWT token; here's how to check it's genuine"
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -39,11 +47,17 @@ builder.Services
             ValidateAudience = true,
             ValidAudience = jwt["Audience"],
             ValidateIssuerSigningKey = true,   // reject tokens not signed with OUR key
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt["Key"]!)),
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
             ValidateLifetime = true,           // reject expired tokens
             ClockSkew = TimeSpan.FromMinutes(1),
             NameClaimType = "name",
-            RoleClaimType = "role"             // [Authorize(Roles = ...)] reads the "role" claim
+            RoleClaimType = "role"             // [Authorize(Roles = ...)] reads the "role" claims
+        };
+        // After the token checks out, re-load the account's CURRENT roles from the database,
+        // so deactivations and role changes take effect immediately (see RoleRefresher.cs).
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = RoleRefresher.OnTokenValidated
         };
     });
 builder.Services.AddAuthorization();
@@ -54,7 +68,7 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("v1", new OpenApiInfo { Title = "Mine Safety API", Version = "v1" });
+    c.SwaggerDoc("v1", new OpenApiInfo { Title = "MineSafe API", Version = "v1" });
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Name = "Authorization",
@@ -76,7 +90,7 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-// CORS: lets a web page on a different address (the future web admin app) call this API.
+// CORS: lets a web page on a different address (the web admin app) call this API.
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
 var app = builder.Build();
@@ -85,18 +99,27 @@ var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
 {
-    // Development only: create the database if it doesn't exist, then fill it with test data.
+    // Development only: put test data into the (script-created) database if it's empty.
+    // The API never creates or changes tables itself.
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<MineSafetyDbContext>();
-    db.Database.EnsureCreated();
-    DbSeeder.Seed(db);
+    try
+    {
+        DbSeeder.Seed(db);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogError(ex,
+            "Could not seed the database. Has it been created from Michael's SQL scripts? " +
+            "Run scripts/create-local-db.ps1 first.");
+    }
 
     app.UseSwagger();
     app.UseSwaggerUI();
 }
 
 app.UseCors();
-app.UseAuthentication();   // 1st: WHO are you? (reads the token)
+app.UseAuthentication();   // 1st: WHO are you? (reads the token, then RoleRefresher)
 app.UseAuthorization();    // 2nd: are you ALLOWED? (checks [Authorize] and roles)
 app.MapControllers();      // 3rd: hand the request to the matching controller method
 

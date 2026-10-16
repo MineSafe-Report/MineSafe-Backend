@@ -3,15 +3,19 @@ using MineSafety.Api.Entities;
 
 namespace MineSafety.Api.Data;
 
-// The DbContext is EF Core's "connection" to the database.
-// Each DbSet below is one table. Writing  _db.Locations.Add(x)  then  SaveChangesAsync()
-// makes EF write the INSERT statement for us.
+// The DbContext is EF Core's "connection" to the database. Each DbSet is one table.
+// Writing  _db.Locations.Add(x)  then  SaveChangesAsync()  makes EF write the INSERT for us.
+//
+// IMPORTANT: Michael's SQL scripts (database/schema) CREATE the tables. This class only
+// DESCRIBES them so EF knows how to read and write. The API never creates or changes tables.
 public class MineSafetyDbContext : DbContext
 {
     public MineSafetyDbContext(DbContextOptions<MineSafetyDbContext> options) : base(options) { }
 
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<Account> Accounts => Set<Account>();
+    public DbSet<AccountRole> AccountRoles => Set<AccountRole>();
+    public DbSet<AccountLocation> AccountLocations => Set<AccountLocation>();
     public DbSet<Location> Locations => Set<Location>();
     public DbSet<IncidentType> IncidentTypes => Set<IncidentType>();
     public DbSet<ReportStatus> ReportStatuses => Set<ReportStatus>();
@@ -21,27 +25,106 @@ public class MineSafetyDbContext : DbContext
     public DbSet<ReportAuditLog> ReportAuditLog => Set<ReportAuditLog>();
     public DbSet<Notification> Notifications => Set<Notification>();
 
-    // Extra rules EF can't guess from the classes alone: unique values, table names, delete rules.
+    // Here we spell out every table name, primary key and any column whose name differs
+    // from the C# property, so EF matches the SQL scripts exactly instead of guessing.
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.Entity<ReportStatus>().HasKey(s => s.StatusId);
-        modelBuilder.Entity<ReportAttachment>().HasKey(a => a.AttachmentId);
-        modelBuilder.Entity<ReportReview>().HasKey(r => r.ReviewId);
-        modelBuilder.Entity<ReportAuditLog>().HasKey(a => a.AuditLogId);
-        modelBuilder.Entity<ReportAuditLog>().ToTable("ReportAuditLog");
+        modelBuilder.Entity<Role>(e =>
+        {
+            e.ToTable("Roles");
+            e.HasKey(x => x.RoleId);
+        });
 
-        // UNIQUE rules: the database itself refuses duplicates, even if our code has a bug.
-        modelBuilder.Entity<Role>().HasIndex(r => r.RoleName).IsUnique();
-        modelBuilder.Entity<Account>().HasIndex(a => a.WorkerId).IsUnique();
-        modelBuilder.Entity<Account>().HasIndex(a => a.Email).IsUnique().HasFilter("[Email] IS NOT NULL");
-        modelBuilder.Entity<Location>().HasIndex(l => l.LocationCode).IsUnique();
-        modelBuilder.Entity<Report>().HasIndex(r => r.ReportNumber).IsUnique();
-        modelBuilder.Entity<Report>().HasIndex(r => r.ClientReportId).IsUnique();
+        modelBuilder.Entity<Account>(e =>
+        {
+            e.ToTable("Accounts");
+            e.HasKey(x => x.AccountId);
+            e.Property(x => x.WorkerId).HasColumnName("WorkerID");
+        });
 
-        // Accounts are linked to reports, reviews, audit rows and notifications.
-        // SQL Server refuses "cascade delete" when a table can be reached by more than one path,
-        // and we soft delete anyway, so we turn cascading off everywhere: nothing auto-deletes.
-        foreach (var fk in modelBuilder.Model.GetEntityTypes().SelectMany(e => e.GetForeignKeys()))
+        modelBuilder.Entity<AccountRole>(e =>
+        {
+            e.ToTable("AccountRoles");
+            e.HasKey(x => x.AccountRoleId);
+            e.HasOne(x => x.Account).WithMany(a => a.AccountRoles).HasForeignKey(x => x.AccountId);
+            e.HasOne(x => x.Role).WithMany().HasForeignKey(x => x.RoleId);
+        });
+
+        modelBuilder.Entity<AccountLocation>(e =>
+        {
+            e.ToTable("AccountLocations");
+            e.HasKey(x => x.AccountLocationId);
+            e.Property(x => x.AccountLocationId).HasColumnName("AccountLocation");   // SQL name has no "ID"
+            e.HasOne(x => x.Account).WithMany(a => a.AccountLocations).HasForeignKey(x => x.AccountId);
+            e.HasOne(x => x.Location).WithMany().HasForeignKey(x => x.LocationId);
+        });
+
+        modelBuilder.Entity<Location>(e =>
+        {
+            e.ToTable("Locations");
+            e.HasKey(x => x.LocationId);
+        });
+
+        modelBuilder.Entity<IncidentType>(e =>
+        {
+            e.ToTable("IncidentTypes");
+            e.HasKey(x => x.IncidentTypeId);
+        });
+
+        modelBuilder.Entity<ReportStatus>(e =>
+        {
+            e.ToTable("ReportStatuses");
+            e.HasKey(x => x.StatusId);
+        });
+
+        modelBuilder.Entity<Report>(e =>
+        {
+            e.ToTable("Reports");
+            e.HasKey(x => x.ReportId);
+            e.HasOne(x => x.Reporter).WithMany().HasForeignKey(x => x.ReporterAccountId);
+            e.HasOne(x => x.IncidentType).WithMany().HasForeignKey(x => x.IncidentTypeId);
+            e.HasOne(x => x.Location).WithMany().HasForeignKey(x => x.LocationId);
+            e.HasOne(x => x.Status).WithMany().HasForeignKey(x => x.StatusId);
+        });
+
+        modelBuilder.Entity<ReportAttachment>(e =>
+        {
+            e.ToTable("ReportAttachments");
+            e.HasKey(x => x.AttachmentId);
+            e.Property(x => x.UploadedByAccountId).HasColumnName("UploadedByAccount"); // SQL name has no "ID"
+            e.HasOne(x => x.Report).WithMany(r => r.Attachments).HasForeignKey(x => x.ReportId);
+            e.HasOne(x => x.UploadedBy).WithMany().HasForeignKey(x => x.UploadedByAccountId);
+        });
+
+        modelBuilder.Entity<ReportReview>(e =>
+        {
+            e.ToTable("ReportReviews");
+            e.HasKey(x => x.ReviewId);
+            e.HasOne(x => x.Report).WithMany(r => r.Reviews).HasForeignKey(x => x.ReportId);
+            e.HasOne(x => x.Reviewer).WithMany().HasForeignKey(x => x.ReviewerAccountId);
+        });
+
+        modelBuilder.Entity<ReportAuditLog>(e =>
+        {
+            e.ToTable("ReportAuditLog");
+            e.HasKey(x => x.AuditLogId);
+            e.Property(x => x.OldValueJson).HasColumnName("OldValueJSON");
+            e.Property(x => x.NewValueJson).HasColumnName("NewValueJSON");
+            e.HasOne(x => x.Report).WithMany().HasForeignKey(x => x.ReportId);
+            e.HasOne(x => x.Actor).WithMany().HasForeignKey(x => x.ActorAccountId);
+        });
+
+        modelBuilder.Entity<Notification>(e =>
+        {
+            e.ToTable("Notifications");
+            e.HasKey(x => x.NotificationId);
+            e.HasOne(x => x.Recipient).WithMany().HasForeignKey(x => x.RecipientAccountId);
+            e.HasOne(x => x.Report).WithMany().HasForeignKey(x => x.ReportId);
+        });
+
+        // We never hard-delete anything (everything is soft delete), so switch off EF's
+        // cascade deletes everywhere. This matches the SQL scripts, which have no cascades.
+        foreach (var fk in modelBuilder.Model.GetEntityTypes().SelectMany(t => t.GetForeignKeys()))
         {
             fk.DeleteBehavior = DeleteBehavior.Restrict;
         }

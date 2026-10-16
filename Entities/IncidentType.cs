@@ -2,10 +2,10 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MineSafety.Api.Entities;
 
-// Matches the "IncidentTypes" table: Hazard, Incident, Near Miss.
+// Matches database/schema/002_IncidentTypes.sql : Hazard, Incident, Near Miss.
 public class IncidentType
 {
-    public int IncidentTypeId { get; set; }
+    public int IncidentTypeId { get; set; }          // IncidentTypeID (PK)
 
     [MaxLength(50)]
     public string TypeName { get; set; } = "";

@@ -14,14 +14,17 @@ namespace MineSafety.Api.Controllers;
 public class LocationsController : ApiControllerBase
 {
     private readonly ILocationService _locations;
+    private readonly IAccessService _access;
 
-    public LocationsController(ILocationService locations)
+    public LocationsController(ILocationService locations, IAccessService access)
     {
         _locations = locations;
+        _access = access;
     }
 
     // GET /api/locations?includeInactive=false&search=tunnel
     // Workers use this for the location dropdown. Admins use it for the locations screen.
+    // Workers/Supervisors only get THEIR assigned locations; Safety Officers/Admins get all.
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] bool includeInactive = false, [FromQuery] string? search = null)
     {
@@ -29,7 +32,8 @@ public class LocationsController : ApiControllerBase
         if (!User.IsInRole(RoleNames.Administrator))
             includeInactive = false;
 
-        var locations = await _locations.GetAllAsync(includeInactive, search);
+        var allowed = await _access.GetAllowedLocationIdsAsync(User);
+        var locations = await _locations.GetAllAsync(includeInactive, search, allowed);
         return Ok(locations);                                        // 200
     }
 
@@ -37,6 +41,11 @@ public class LocationsController : ApiControllerBase
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id)
     {
+        // Outside your assigned locations? Answer 404, as if it doesn't exist (no data leakage).
+        var allowed = await _access.GetAllowedLocationIdsAsync(User);
+        if (allowed != null && !allowed.Contains(id))
+            return NotFound(new { message = $"Location {id} was not found." });
+
         var result = await _locations.GetByIdAsync(id);
         return result.Success ? Ok(result.Value) : ErrorResponse(result);
     }

@@ -1,32 +1,42 @@
-# Mine Safety API
+# MineSafe API
 
 The backend for the mine safety reporting app (ITMDA3 Deliverable 4).
 ASP.NET Core Web API (.NET 9) + EF Core + SQL Server + JWT login.
 
-**Built so far:** login, Locations (full CRUD), Accounts (full CRUD), Roles list.
+**Built so far:** login (multi-role, re-checked every request), Locations (full CRUD, location-scoped), Accounts (full CRUD with AccountRoles and AccountLocations), Roles list.
 **Next:** Reports (submit, list, view, photo upload, supervisor review), Notifications.
 
 ---
 
 ## 1. How to run it
 
-1. Open `MineSafetyApi.csproj` in Visual Studio (or the folder in VS Code).
-2. Press **F5** (or run `dotnet run` in a terminal in this folder).
-   The first run downloads the packages, which takes a minute.
-3. Your browser opens on **http://localhost:5080/swagger**.
+**One-time setup: create the database from Michael's scripts**
 
-On first run the app creates a database called `MineSafetyDb` in **SQL Server LocalDB**
-(installed with Visual Studio) and fills it with test data. If LocalDB isn't installed,
-change the connection string in `appsettings.json` to point at your SQL Server.
+The API does **not** create tables. The SQL scripts in `database/schema` are the source of truth.
+
+```powershell
+./scripts/create-local-db.ps1
+```
+
+This creates a `MineSafetyDb` database in SQL Server LocalDB (installed with Visual Studio) and
+runs the 12 schema scripts in order. No `sqlcmd`? See the comment at the top of the script for
+the SSMS route.
+
+**Then run the API**
+
+1. Open `MineSafetyApi.csproj` in Visual Studio and press **F5** (or `dotnet run`).
+2. On first run in Development it fills the empty tables with test data (`Data/DbSeeder.cs`).
+3. Your browser opens on **http://localhost:5080/swagger**.
 
 ### Test accounts (password for all: `Password123!`)
 
-| Worker ID | Role |
-|---|---|
-| W1001 | Worker |
-| S2001 | Supervisor |
-| O3001 | SafetyOfficer |
-| A9001 | Administrator |
+| Worker ID | Role | Locations |
+|---|---|---|
+| W1001 | Worker | Tunnel 7 (default), Stope 12B |
+| S2001 | Supervisor | Tunnel 7 (default), Stope 12B |
+| S2002 | Supervisor | Shaft 1 Station (default), Workshop |
+| O3001 | SafetyOfficer | all (role sees everything) |
+| A9001 | Administrator | all (role sees everything) |
 
 ### Testing in Swagger
 
@@ -34,7 +44,9 @@ change the connection string in `appsettings.json` to point at your SQL Server.
 2. Copy the `token` value from the response (without the quotes).
 3. Click the **Authorize** button at the top, paste the token, click Authorize.
 4. Now every other endpoint works as that user. Try `GET /api/locations`.
-5. To test permissions, log in as `W1001` instead and try `POST /api/locations`: you get **403**.
+5. Permissions: log in as `W1001` and try `POST /api/locations`: you get **403**.
+6. Location scoping: log in as `S2002` and call `GET /api/locations`: you only get Shaft 1 Station
+   and Workshop. `GET /api/locations/2` (Tunnel 7) returns **404**.
 
 ---
 
@@ -46,9 +58,11 @@ change the connection string in `appsettings.json` to point at your SQL Server.
 | `Controllers/` | Receive HTTP requests, call a service, return a status code | The receptionist |
 | `Services/` | The actual rules and work (checks, saving, hashing) | The person doing the job |
 | `Dtos/` | Shapes of the JSON going in and out | The forms people fill in |
-| `Entities/` | C# classes that mirror the database tables (from the D3 ERD) | The filing cabinet layout |
+| `Entities/` | C# classes that mirror the database tables (from Michael's SQL scripts) | The filing cabinet layout |
 | `Data/` | `MineSafetyDbContext` (EF Core's link to the DB) and the test-data seeder | The filing clerk |
 | `Common/` | Small shared helpers (role names, ServiceResult) | |
+| `scripts/` | `create-local-db.ps1`: builds the dev database from `database/schema` | |
+| `database/` | **Michael's** SQL schema, migrations and seed scripts. Don't edit without him. | |
 
 ---
 
@@ -88,9 +102,18 @@ Every endpoint follows this same path. Once you understand this one, you underst
   disappear from the worker's dropdown.
 - **Password hashing:** `PasswordHasher` turns a password into a one-way hash. We store the hash,
   and at login we hash what was typed and compare.
-- **JWT:** after login the app gets a signed token holding the account ID and role. It sends it
+- **JWT:** after login the app gets a signed token holding the account ID and roles. It sends it
   with every request as the header `Authorization: Bearer <token>`. Lasts 12 hours (one shift).
   "Logout" = the app deletes its saved token.
+- **Roles via AccountRoles:** `Accounts` has no role column. Each row in `AccountRoles` links one
+  account to one role, so an account can have several. Removing a role sets `IsActive = false` on
+  that row (history is kept, and SQL only allows one row per account + role).
+- **Roles re-checked on every request** (`Services/RoleRefresher.cs`): after the token is verified,
+  the API loads the account's *current* active roles from the database. A deactivated account or a
+  removed role stops working on the very next request, even if the token hasn't expired.
+- **Location scoping** (`Services/AccessService.cs`): Workers and Supervisors only see the locations
+  assigned to them in `AccountLocations`. Safety Officers and Admins see all. Anything outside your
+  locations answers 404, so you can't even tell it exists.
 
 ---
 
@@ -119,6 +142,21 @@ fields that failed under `errors`.
 |---|---|---|---|---|
 | GET | `/api/accounts` | admin | `?search=&roleId=&includeInactive=` | 200 list |
 | GET | `/api/accounts/{id}` | admin | | 200 / 404 |
+| POST | `/api/accounts` | admin | `{ workerId, fullName, email, password, roleIds: [..], locationIds: [..], defaultLocationId }` | 201 / 400 / 409 |
+| PUT | `/api/accounts/{id}` | admin | `{ fullName, email, roleIds, locationIds, defaultLocationId, isActive, newPassword? }` (full new state) | 200 / 400 / 404 / 409 |
+| DELETE | `/api/accounts/{id}` | admin | | 204 / 400 / 404 (soft delete) |
+| GET | `/api/roles` | admin | | 200 list (for the role dropdown) |
+
+Account responses include `roles: [{ roleId, roleName }]` and
+`locations: [{ locationId, locationName, locationCode, isDefault }]`. Login and `/api/auth/me` return
+`roles` as a list of names, plus the same `locations` list (the app can pre-select the default).
+
+Rules: email is required; Workers and Supervisors need at least one location; an admin can't
+deactivate themselves or remove their own Administrator role.
+
+---|---|---|---|---|
+| GET | `/api/accounts` | admin | `?search=&roleId=&includeInactive=` | 200 list |
+| GET | `/api/accounts/{id}` | admin | | 200 / 404 |
 | POST | `/api/accounts` | admin | `{ workerId, fullName, email, password, roleId }` | 201 / 400 / 409 |
 | PUT | `/api/accounts/{id}` | admin | `{ fullName, email, roleId, isActive, newPassword? }` | 200 / 400 / 404 / 409 |
 | DELETE | `/api/accounts/{id}` | admin | | 204 / 400 / 404 (soft delete) |
@@ -126,16 +164,30 @@ fields that failed under `errors`.
 
 ---
 
-## 6. Things to agree with Michael
+## 6. Alignment with the database (Michael's schema)
 
-- The entities in `Entities/` follow the D3 ERD exactly. In development the app **creates the
-  tables itself** (`EnsureCreated`). If Michael builds the database by script instead, the table
-  and column names must match these classes.
-- Two columns were **added to Reports** that the ERD is missing: `ClientReportId` (stops duplicate
-  uploads when the phone retries) and `OccurredAt` (when the event happened underground).
-- The ERD has both `Accounts.RoleID` and an `AccountRoles` table. We use **`Accounts.RoleID` only**.
-- `AccountLocations` (supervisor areas) and `AccountRoles` are left out for the prototype.
-- ERD typo: `AttachementID` is `AttachmentId` here.
+The C# entities follow `database/schema/*.sql` exactly. Where a SQL column name differs from the
+C# property, it is mapped explicitly in `Data/MineSafetyDbContext.cs`:
+
+| C# property | SQL column |
+|---|---|
+| `Account.WorkerId` | `Accounts.WorkerID` |
+| `AccountLocation.AccountLocationId` | `AccountLocations.AccountLocation` (PK) |
+| `ReportAttachment.UploadedByAccountId` | `ReportAttachments.UploadedByAccount` |
+| `ReportAuditLog.OldValueJson / NewValueJson` | `OldValueJSON / NewValueJSON` |
+
+- The API never creates or alters tables (no `EnsureCreated`, no migrations).
+- Test data is seeded by the API in Development only, table by table, and only into empty tables.
+  Test accounts are seeded in C# because the password hashes must come from the same
+  `PasswordHasher` the login uses. Reference data (roles, types, statuses, locations) can move to
+  Michael's `database/seed` scripts at any time: the seeder skips tables that already have rows.
+- The JWT key is not in `appsettings.json`. Development uses `appsettings.Development.json`
+  (dev-only key); anywhere else set the environment variable `Jwt__Key`.
+
+### Known gaps (planned next)
+- Reports: submit (with `ClientReportId` duplicate protection), list, view, edit.
+- Attachments, reviews, audit log, notifications.
+- Not yet run against a live SQL Server built from the scripts: needs testing on a dev machine.
 
 ## 7. Connecting the phone later
 

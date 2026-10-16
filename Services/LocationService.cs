@@ -11,7 +11,8 @@ namespace MineSafety.Api.Services;
 // so the class can change without the controller changing.
 public interface ILocationService
 {
-    Task<List<LocationDto>> GetAllAsync(bool includeInactive, string? search);
+    // allowedLocationIds: null = no limit, otherwise only these IDs are returned.
+    Task<List<LocationDto>> GetAllAsync(bool includeInactive, string? search, List<int>? allowedLocationIds);
     Task<ServiceResult<LocationDto>> GetByIdAsync(int id);
     Task<ServiceResult<LocationDto>> CreateAsync(CreateLocationRequest request);
     Task<ServiceResult<LocationDto>> UpdateAsync(int id, UpdateLocationRequest request);
@@ -30,7 +31,7 @@ public class LocationService : ILocationService
     }
 
     // READ (list)
-    public async Task<List<LocationDto>> GetAllAsync(bool includeInactive, string? search)
+    public async Task<List<LocationDto>> GetAllAsync(bool includeInactive, string? search, List<int>? allowedLocationIds)
     {
         // Start with "all locations" and add filters step by step.
         // Nothing is sent to the database until ToListAsync() at the end.
@@ -38,6 +39,10 @@ public class LocationService : ILocationService
 
         if (!includeInactive)
             query = query.Where(l => l.IsActive);
+
+        // Location scoping: Workers/Supervisors only get the locations assigned to them.
+        if (allowedLocationIds != null)
+            query = query.Where(l => allowedLocationIds.Contains(l.LocationId));
 
         if (!string.IsNullOrWhiteSpace(search))
         {

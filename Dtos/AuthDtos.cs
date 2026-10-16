@@ -9,7 +9,7 @@ namespace MineSafety.Api.Dtos;
 public class LoginRequest
 {
     // Worker ID (e.g. W1001) or email address. Both work.
-    [Required]
+    [Required, MaxLength(255)]
     public string Login { get; set; } = "";
 
     [Required]
@@ -30,5 +30,16 @@ public class CurrentUserDto
     public int AccountId { get; set; }
     public string WorkerId { get; set; } = "";
     public string FullName { get; set; } = "";
-    public string Role { get; set; } = "";           // the app uses this to show/hide screens
+    public string Email { get; set; } = "";
+    public List<string> Roles { get; set; } = new();             // the app uses these to show/hide screens
+    public List<AssignedLocationDto> Locations { get; set; } = new();
+}
+
+// A location linked to an account (from AccountLocations)
+public class AssignedLocationDto
+{
+    public int LocationId { get; set; }
+    public string LocationName { get; set; } = "";
+    public string LocationCode { get; set; } = "";
+    public bool IsDefault { get; set; }
 }
