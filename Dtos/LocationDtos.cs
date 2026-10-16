@@ -23,17 +23,17 @@ public class LocationDto
     };
 }
 
-// What the app sends to CREATE a location. The [attributes] are validation rules:
-// if they fail, ASP.NET returns 400 with the field errors before our code even runs.
+// What the app sends to CREATE a location. The [attributes] are validation rules that match
+// the SQL column sizes: break them and ASP.NET returns 400 before our code even runs.
 public class CreateLocationRequest
 {
     [Required, MaxLength(100)]
     public string LocationName { get; set; } = "";
 
-    [Required, MaxLength(20)]
+    [Required, MaxLength(50)]
     public string LocationCode { get; set; } = "";
 
-    [MaxLength(500)]
+    [MaxLength(255)]
     public string? LocationInfo { get; set; }
 }
 
@@ -43,10 +43,10 @@ public class UpdateLocationRequest
     [Required, MaxLength(100)]
     public string LocationName { get; set; } = "";
 
-    [Required, MaxLength(20)]
+    [Required, MaxLength(50)]
     public string LocationCode { get; set; } = "";
 
-    [MaxLength(500)]
+    [MaxLength(255)]
     public string? LocationInfo { get; set; }
 
     public bool IsActive { get; set; } = true;

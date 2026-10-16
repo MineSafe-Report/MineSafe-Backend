@@ -19,6 +19,7 @@ public class AccountsController : ApiControllerBase
     }
 
     // GET /api/accounts?search=bob&roleId=1&includeInactive=true
+    // roleId filter = accounts that currently have that role (active AccountRoles row)
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] string? search = null, [FromQuery] int? roleId = null,
                                             [FromQuery] bool includeInactive = true)
@@ -35,17 +36,20 @@ public class AccountsController : ApiControllerBase
     }
 
     // POST /api/accounts
+    // body: { workerId, fullName, email, password, roleIds: [1], locationIds: [2,3], defaultLocationId: 2 }
     [HttpPost]
     public async Task<IActionResult> Create(CreateAccountRequest request)
     {
-        var result = await _accounts.CreateAsync(request);
+        var result = await _accounts.CreateAsync(request, CurrentAccountId);
         if (!result.Success)
             return ErrorResponse(result);
 
         return CreatedAtAction(nameof(GetById), new { id = result.Value!.AccountId }, result.Value);
     }
 
-    // PUT /api/accounts/5    (also used for admin password reset via "newPassword")
+    // PUT /api/accounts/5
+    // Send the FULL new state: roles/locations missing from the lists are switched off.
+    // Also used for admin password reset via "newPassword".
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, UpdateAccountRequest request)
     {

@@ -21,7 +21,7 @@ public class AuthService : IAuthService
     private readonly PasswordHasher<Account> _hasher = new();
 
     // The DbContext and TokenService are "injected": Program.cs registered them,
-    // and ASP.NET hands them to us here automatically. That's dependency injection.
+    // and ASP.NET hands them to us here automatically.
     public AuthService(MineSafetyDbContext db, ITokenService tokens)
     {
         _db = db;
@@ -32,10 +32,9 @@ public class AuthService : IAuthService
     {
         var login = request.Login.Trim();
 
-        // Find the account by worker ID OR email, and load its Role at the same time.
-        var account = await _db.Accounts
-            .Include(a => a.Role)
-            .FirstOrDefaultAsync(a => a.WorkerId == login || a.Email == login);
+        // Find the account by worker ID OR email, and load its role and location links.
+        var account = await LoadAccount()
+            .FirstOrDefaultAsync(a => a.WorkerId == login || a.Email == login.ToLower());
 
         // Same vague message for every failure, so nobody can use the login screen
         // to find out which worker IDs exist.
@@ -49,21 +48,23 @@ public class AuthService : IAuthService
         if (check == PasswordVerificationResult.Failed)
             return ServiceResult<LoginResponse>.BadRequest(failMessage);
 
-        var (token, expiresAt) = _tokens.CreateToken(account, account.Role.RoleName);
+        var user = ToCurrentUser(account);
+        if (user.Roles.Count == 0)
+            return ServiceResult<LoginResponse>.BadRequest("This account has no active role. Contact an administrator.");
+
+        var (token, expiresAt) = _tokens.CreateToken(account, user.Roles);
 
         return ServiceResult<LoginResponse>.Ok(new LoginResponse
         {
             Token = token,
             ExpiresAt = expiresAt,
-            User = ToCurrentUser(account)
+            User = user
         });
     }
 
     public async Task<ServiceResult<CurrentUserDto>> GetCurrentUserAsync(int accountId)
     {
-        var account = await _db.Accounts
-            .AsNoTracking()                          // read-only query: a bit faster, nothing will be saved
-            .Include(a => a.Role)
+        var account = await LoadAccount().AsNoTracking()
             .FirstOrDefaultAsync(a => a.AccountId == accountId && a.IsActive);
 
         return account == null
@@ -71,11 +72,28 @@ public class AuthService : IAuthService
             : ServiceResult<CurrentUserDto>.Ok(ToCurrentUser(account));
     }
 
+    // Accounts together with their role links (+ role names) and location links (+ locations).
+    private IQueryable<Account> LoadAccount() => _db.Accounts
+        .Include(a => a.AccountRoles).ThenInclude(ar => ar.Role)
+        .Include(a => a.AccountLocations).ThenInclude(al => al.Location);
+
+    // Only ACTIVE role and location links count. Inactive ones are history, not access.
     private static CurrentUserDto ToCurrentUser(Account a) => new()
     {
         AccountId = a.AccountId,
         WorkerId = a.WorkerId,
         FullName = a.FullName,
-        Role = a.Role.RoleName
+        Email = a.Email,
+        Roles = a.AccountRoles.Where(ar => ar.IsActive).Select(ar => ar.Role.RoleName).ToList(),
+        Locations = a.AccountLocations
+            .Where(al => al.IsActive && al.Location.IsActive)
+            .Select(al => new AssignedLocationDto
+            {
+                LocationId = al.LocationId,
+                LocationName = al.Location.LocationName,
+                LocationCode = al.Location.LocationCode,
+                IsDefault = al.IsDefault
+            })
+            .ToList()
     };
 }
