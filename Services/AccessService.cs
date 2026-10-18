@@ -10,6 +10,9 @@ public interface IAccessService
     // null  = this user may see EVERY location (Safety Officer, Administrator)
     // list  = this user may only see these location IDs (from AccountLocations)
     Task<List<int>?> GetAllowedLocationIdsAsync(ClaimsPrincipal user);
+
+    // Account ID + current roles + allowed locations, bundled for the services to use.
+    Task<CurrentUser> GetCurrentUserAsync(ClaimsPrincipal user);
 }
 
 // Location-scoped access in ONE place. Reports (next step) will use the same method, so a
@@ -35,5 +38,16 @@ public class AccessService : IAccessService
             .Where(al => al.AccountId == accountId && al.IsActive && al.Location.IsActive)
             .Select(al => al.LocationId)
             .ToListAsync();
+    }
+
+    public async Task<CurrentUser> GetCurrentUserAsync(ClaimsPrincipal user)
+    {
+        return new CurrentUser
+        {
+            AccountId = int.Parse(user.FindFirst("sub")!.Value),
+            // These are the roles RoleRefresher just loaded fresh from the database.
+            Roles = user.FindAll("role").Select(c => c.Value).ToList(),
+            AllowedLocationIds = await GetAllowedLocationIdsAsync(user)
+        };
     }
 }

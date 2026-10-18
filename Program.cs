@@ -25,6 +25,9 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IAccessService, AccessService>();
 builder.Services.AddScoped<ILocationService, LocationService>();
 builder.Services.AddScoped<IAccountService, AccountService>();
+builder.Services.AddScoped<IReportService, ReportService>();
+builder.Services.AddScoped<INotificationService, NotificationService>();
+builder.Services.AddScoped<ILookupService, LookupService>();
 
 // The JWT signing key is a secret, so it is NOT in appsettings.json (which is committed).
 // In development it comes from appsettings.Development.json; anywhere else, from an

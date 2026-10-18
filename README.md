@@ -4,7 +4,8 @@ The backend for the mine safety reporting app (ITMDA3 Deliverable 4).
 ASP.NET Core Web API (.NET 9) + EF Core + SQL Server + JWT login.
 
 **Built so far:** login (multi-role, re-checked every request), Locations (full CRUD, location-scoped), Accounts (full CRUD with AccountRoles and AccountLocations), Roles list.
-**Next:** Reports (submit, list, view, photo upload, supervisor review), Notifications.
+**Built:** Reports (submit with offline duplicate protection, list, my reports, review queue, view, edit, withdraw), supervisor review, audit log, notifications, lookups.
+**Next:** photo/voice attachments.
 
 ---
 
@@ -164,6 +165,43 @@ deactivate themselves or remove their own Administrator role.
 
 ---
 
+### Reports
+| Method | URL | Who | Body / query | Returns |
+|---|---|---|---|---|
+| POST | `/api/reports` | Worker, Supervisor | `{ clientReportId, incidentTypeId, locationId, description, occurredAt }` | **201** new / **200** already had it (retry) / 400 / 409 |
+| GET | `/api/reports` | logged in | `?status=&incidentTypeId=&locationId=&search=&page=&pageSize=` | 200 page of reports you may see |
+| GET | `/api/reports/my` | logged in | same filters | 200 page of your own reports |
+| GET | `/api/reports/review-queue` | Supervisor, SafetyOfficer | same filters | 200 Pending Review only, urgent first |
+| GET | `/api/reports/{id}` | logged in (if visible) | | 200 detail incl. reviews + `canEdit/canWithdraw/canReview` / 404 |
+| PUT | `/api/reports/{id}` | reporter (while pending), SafetyOfficer | `{ incidentTypeId, locationId, description, occurredAt }` | 200 / 400 / 404 / 409 |
+| DELETE | `/api/reports/{id}` | reporter (while pending), SafetyOfficer | | 204 (withdraw = soft delete) |
+| POST | `/api/reports/{id}/reviews` | Supervisor, SafetyOfficer | `{ decision: "APPROVED" \| "DENIED", comment }` (comment required for DENIED) | 200 / 400 / 404 / 409 |
+| GET | `/api/reports/{id}/audit` | SafetyOfficer, Administrator | | 200 history |
+
+Who sees which reports: Worker = own; Supervisor = own + assigned locations; SafetyOfficer/Admin = all.
+Anything outside that answers 404.
+
+**Offline sync contract for the app:** create a new GUID as `clientReportId` when the report is first
+made on the phone, store it with the local report, and send the **same** value on every retry.
+`201` or `200` both mean "synced": save the returned `reportId` / `reportNumber` and mark it done.
+`409` means the ID was reused for different content (bug on the phone side). Always send `occurredAt`
+with a time zone (`Z` or `+02:00`).
+
+### Notifications and lookups
+| Method | URL | Who | Returns |
+|---|---|---|---|
+| GET | `/api/notifications?unreadOnly=&page=&pageSize=` | logged in | your alerts, unread + urgent first |
+| PUT | `/api/notifications/{id}/read` | recipient only | 200 / 404 |
+| PUT | `/api/notifications/read-all` | logged in | `{ markedRead }` |
+| GET | `/api/incident-types` | logged in | Hazard / Incident / Near Miss with IDs |
+| GET | `/api/report-statuses` | logged in | status list |
+
+Alerts are created automatically: a new report notifies the Supervisors of that location
+(`NEW_REPORT`); an Incident also notifies all Safety Officers (`INCIDENT_ALERT`); a review notifies
+the reporter (`REPORT_REVIEWED`).
+
+---
+
 ## 6. Alignment with the database (Michael's schema)
 
 The C# entities follow `database/schema/*.sql` exactly. Where a SQL column name differs from the
@@ -184,10 +222,11 @@ C# property, it is mapped explicitly in `Data/MineSafetyDbContext.cs`:
 - The JWT key is not in `appsettings.json`. Development uses `appsettings.Development.json`
   (dev-only key); anywhere else set the environment variable `Jwt__Key`.
 
-### Known gaps (planned next)
-- Reports: submit (with `ClientReportId` duplicate protection), list, view, edit.
-- Attachments, reviews, audit log, notifications.
-- Not yet run against a live SQL Server built from the scripts: needs testing on a dev machine.
+### Known gaps
+- Photo / voice-note attachments (next).
+- Escalation from Supervisor to Safety Officer (D3 user story) is not a separate status yet:
+  Safety Officers already see and can review every report, and Incidents alert them directly.
+- Push notifications (Firebase) not wired; alerts are in-app via `/api/notifications`.
 
 ## 7. Connecting the phone later
 
