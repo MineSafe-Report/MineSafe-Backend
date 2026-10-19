@@ -1,6 +1,16 @@
 # MineSafe SQL Server Database
 
-This directory contains the Microsoft SQL Server schema, migrations, and seed scripts for the MineSafe Mobile Incident Reporting System. The SQL schema is the authoritative database contract used by the ASP.NET Core API and Android application.
+This directory contains the Microsoft SQL Server schema, migrations, seeds, diagnostics, and tests for the MineSafe Mobile Incident Reporting System. The SQL schema is the authoritative database contract used by the ASP.NET Core API and Android application.
+
+## Folder purpose
+
+- `schema/` contains the twelve base-table scripts for a clean database.
+- `seed/` contains repeatable reference and development seed scripts.
+- `migrations/` contains ordered changes for databases created from an older schema.
+- `queries/` contains read-only development and diagnostic queries. Adjust their declared filter variables before running them.
+- `tests/` contains SQL Server checks. Mutation tests run in transactions and roll back their changes; several tests require the reference seeds and some require an existing report/account.
+
+Future database changes should be added as ordered migration scripts and coordinated with Rikus before the API starts depending on them. Do not edit an already-deployed migration unless a confirmed defect and deployment plan require it.
 
 ## Database architecture
 
@@ -12,6 +22,8 @@ Account authorization uses normalized assignment tables:
 - `AccountRoles` assigns one or more roles to an account. `IsActive` preserves historical assignments without deleting them.
 - `AccountLocations` assigns the locations an account may access and records `IsDefault`, `IsActive`, `AssignedAt`, and `AssignedBy`.
 - `Roles` and `Locations` provide the referenced role and location records.
+
+`AccountLocations` allows multiple permitted locations per account. A filtered unique index permits at most one row per account that is both active and the default.
 
 The API is responsible for enforcing endpoint permissions and location-scoped access. SQL Server preserves the assignment data and referential integrity; it does not implement authorization rules.
 
@@ -57,7 +69,17 @@ Run the schema scripts against an empty database in this exact order:
 
 Each file contains one `CREATE TABLE` statement followed by its related indexes. Do not run the migration after a fresh deployment made from the current schema unless deployment tooling requires migrations to be recorded; the current base schema already includes the offline fields.
 
-Seed scripts in `database/seed/` are separate from schema creation and should be reviewed and executed only after all schema scripts complete successfully.
+Seed scripts are separate from schema creation. After all schema scripts complete successfully, run them in this order:
+
+1. `seed/Seed_Roles.sql`
+2. `seed/Seed_IncidentTypes.sql`
+3. `seed/Seed_ReportStatuses.sql`
+4. `seed/Seed_Locations.sql` for local development only
+5. `seed/Seed_TestAccounts.sql` (documentation only; it deliberately inserts no accounts)
+
+The role, incident-type, and status scripts are idempotent and insert only missing values. The location script uses the locations already established by the application development seeder, but they are explicitly development data—not approved production locations. Official production location codes and descriptions still require business confirmation.
+
+Test accounts are not created by SQL because passwords must be hashed through the application's ASP.NET Core password hasher. Development account creation remains with the application development seeder. Production requires a separately approved secure bootstrap-administrator process; never put plaintext passwords, password guesses, JWT keys, or connection strings in these scripts.
 
 ## Updating an existing database
 
@@ -79,6 +101,8 @@ The `:r` directive is supported by SQLCMD mode. Alternatively, open the migratio
 - adds uniqueness for `ClientReportId` when no equivalent unique index exists;
 - uses a transaction, `XACT_ABORT`, and `TRY/CATCH` rollback;
 - can be executed again safely when the expected columns and uniqueness already exist.
+
+`002_AddDatabaseValidation.sql` adds the one-active-default-location index, the review-decision check, and the optional SHA-256 format check to an existing database. It first rejects conflicting existing data instead of silently changing it. Fresh databases already receive these rules from the base schema and do not need this migration.
 
 Back up the target database and test migrations in a development environment before production deployment.
 
@@ -122,5 +146,35 @@ The ASP.NET Core API must follow these database contracts:
 - The attachment uploader column is named `ReportAttachments.UploadedByAccount`; a differently named C# property must be mapped explicitly to it.
 - Entity Framework mappings and API validation must respect every SQL column's length and nullability.
 - Accounts and assignments should be deactivated rather than deleted so historical reports and audit records remain valid.
+
+## Deactivation and concurrency
+
+- `Accounts`, `Locations`, `IncidentTypes`, `AccountRoles`, `AccountLocations`, and `Reports` use `IsActive` where the current design requires deactivation rather than deletion.
+- `ReportAttachments` uses `IsDeleted` so attachment metadata can remain associated with report history.
+- Foreign keys intentionally have no cascading-delete action.
+- `Accounts.RowVersion` and `Reports.RowVersion` are SQL Server `ROWVERSION` columns used for optimistic concurrency.
+
+## Clean development database
+
+Use a disposable SQL Server or LocalDB database. Run the twelve `schema/` scripts in the documented order, then run the approved seed scripts in seed order. The repository helper at `scripts/create-local-db.ps1` performs schema creation, while Development-mode application startup can provision its established development accounts.
+
+After creation:
+
+1. Run `tests/Test_CleanDeployment.sql`.
+2. Run `tests/Test_ReferenceData.sql` after seeding.
+3. Run the remaining test scripts individually. Tests that require existing report data clearly print `SKIP` when their prerequisite is unavailable.
+4. Use `queries/DatabaseDiagnostics.sql` for read-only verification.
+
+Do not point creation scripts or transaction tests at production. Back up any persistent environment before migrations. The schema scripts are intended for an empty database and are not idempotent; the seeds and the offline migration are designed to be safely repeatable under their documented assumptions.
+
+## Confirmed central-database boundaries
+
+- `AccountRoles` is the authoritative role relationship; `Accounts.RoleID` must not be introduced.
+- `AccountLocations` stores active location-scoped access and the optional default location.
+- `Reports.ReportNumber` is a unique report identifier, not a foreign key.
+- `Reports.ClientReportId` supplies mobile retry idempotency and duplicate protection.
+- Mobile outbox tables belong to the device-local database and are not part of these twelve SQL Server tables.
+- Attachment storage keys are indexed but intentionally not unique because global uniqueness is not yet an established contract.
+- Notification types are not constrained because the set may grow with API behavior.
 
 The API developer should not use `EnsureCreated` as a replacement for executing the authoritative SQL schema and ordered migrations against shared environments.
