@@ -9,7 +9,8 @@ CREATE TABLE ReportReviews (
 
     CONSTRAINT PK_ReportReviews PRIMARY KEY (ReviewID),
     CONSTRAINT FK_ReportReviews_Reports FOREIGN KEY (ReportID) REFERENCES Reports(ReportID),
-    CONSTRAINT FK_ReportReviews_Reviewer_Accounts FOREIGN KEY (ReviewerAccountID) REFERENCES Accounts(AccountID)
+    CONSTRAINT FK_ReportReviews_Reviewer_Accounts FOREIGN KEY (ReviewerAccountID) REFERENCES Accounts(AccountID),
+    CONSTRAINT CK_ReportReviews_Decision CHECK (Decision IN (N'APPROVED', N'DENIED'))
 );
 
 CREATE INDEX IX_ReportReviews_ReportID

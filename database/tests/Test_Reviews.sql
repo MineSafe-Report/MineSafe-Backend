@@ -1,0 +1,9 @@
+-- Uses an existing report and a different existing account; makes no lasting change.
+SET XACT_ABORT OFF; BEGIN TRANSACTION;
+BEGIN TRY
+    DECLARE @R INT=(SELECT TOP(1) ReportID FROM Reports ORDER BY ReportID), @A INT=(SELECT TOP(1) AccountID FROM Accounts ORDER BY AccountID);
+    IF @R IS NULL OR @A IS NULL BEGIN PRINT 'SKIP: reviews require an existing report and account.'; ROLLBACK; RETURN; END;
+    INSERT ReportReviews(ReportID,ReviewerAccountID,Decision) VALUES(@R,@A,N'APPROVED');
+    BEGIN TRY INSERT ReportReviews(ReportID,ReviewerAccountID,Decision) VALUES(@R,@A,N'INVALID'); THROW 51001,'Invalid decision accepted.',1; END TRY BEGIN CATCH IF ERROR_NUMBER()=51001 THROW; END CATCH;
+    PRINT 'PASS: reviews'; ROLLBACK;
+END TRY BEGIN CATCH IF XACT_STATE()<>0 ROLLBACK; THROW; END CATCH;

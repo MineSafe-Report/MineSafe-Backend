@@ -16,7 +16,11 @@ CREATE TABLE ReportAttachments (
     CONSTRAINT PK_ReportAttachments PRIMARY KEY (AttachmentID),
     CONSTRAINT FK_ReportAttachments_Reports FOREIGN KEY (ReportID) REFERENCES Reports(ReportID),
     CONSTRAINT FK_ReportAttachments_UploadedBy_Accounts FOREIGN KEY (UploadedByAccount) REFERENCES Accounts(AccountID),
-    CONSTRAINT CK_ReportAttachments_SizeBytes CHECK (SizeBytes >= 0)
+    CONSTRAINT CK_ReportAttachments_SizeBytes CHECK (SizeBytes >= 0),
+    CONSTRAINT CK_ReportAttachments_Sha256Hash CHECK (
+        Sha256Hash IS NULL
+        OR (DATALENGTH(Sha256Hash) = 64 AND Sha256Hash NOT LIKE '%[^0-9A-Fa-f]%')
+    )
 );
 
 CREATE INDEX IX_ReportAttachments_ReportID
