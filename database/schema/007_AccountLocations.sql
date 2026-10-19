@@ -22,3 +22,9 @@ CREATE INDEX IX_AccountLocations_LocationID
 
 CREATE INDEX IX_AccountLocations_AssignedBy
     ON AccountLocations (AssignedBy);
+
+-- An account may be assigned to many locations, but only one active assignment
+-- may be the default location used by the client.
+CREATE UNIQUE INDEX UX_AccountLocations_OneActiveDefaultPerAccount
+    ON AccountLocations (AccountID)
+    WHERE IsDefault = 1 AND IsActive = 1;
