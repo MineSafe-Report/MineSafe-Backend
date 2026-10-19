@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using MineSafety.Api.Entities;
 
 namespace MineSafety.Api.Data;
@@ -127,6 +128,25 @@ public class MineSafetyDbContext : DbContext
         foreach (var fk in modelBuilder.Model.GetEntityTypes().SelectMany(t => t.GetForeignKeys()))
         {
             fk.DeleteBehavior = DeleteBehavior.Restrict;
+        }
+
+        // Every date in the database is stored in UTC, but SQL's DATETIME2 doesn't remember that.
+        // Without this, dates come back "unlabelled" and the JSON has no "Z" on the end, so the
+        // phone can't tell UTC from local time. These converters label every date read from the
+        // database as UTC, so the JSON always looks like "2026-10-18T09:30:00Z".
+        var utc = new ValueConverter<DateTime, DateTime>(
+            v => v,
+            v => DateTime.SpecifyKind(v, DateTimeKind.Utc));
+        var utcNullable = new ValueConverter<DateTime?, DateTime?>(
+            v => v,
+            v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v);
+
+        foreach (var property in modelBuilder.Model.GetEntityTypes().SelectMany(t => t.GetProperties()))
+        {
+            if (property.ClrType == typeof(DateTime))
+                property.SetValueConverter(utc);
+            else if (property.ClrType == typeof(DateTime?))
+                property.SetValueConverter(utcNullable);
         }
     }
 }

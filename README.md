@@ -4,8 +4,7 @@ The backend for the mine safety reporting app (ITMDA3 Deliverable 4).
 ASP.NET Core Web API (.NET 9) + EF Core + SQL Server + JWT login.
 
 **Built so far:** login (multi-role, re-checked every request), Locations (full CRUD, location-scoped), Accounts (full CRUD with AccountRoles and AccountLocations), Roles list.
-**Built:** Reports (submit with offline duplicate protection, list, my reports, review queue, view, edit, withdraw), supervisor review, audit log, notifications, lookups.
-**Next:** photo/voice attachments.
+**Built:** Reports (submit with offline duplicate protection, my reports, view, edit, withdraw), photo/voice attachments, supervisor review, Safety Officer incident view, audit log, notifications, lookups, health check. Routes follow the team's API alignment document (19 Oct).
 
 ---
 
@@ -165,40 +164,60 @@ deactivate themselves or remove their own Administrator role.
 
 ---
 
-### Reports
+### Reports (worker)
 | Method | URL | Who | Body / query | Returns |
 |---|---|---|---|---|
-| POST | `/api/reports` | Worker, Supervisor | `{ clientReportId, incidentTypeId, locationId, description, occurredAt }` | **201** new / **200** already had it (retry) / 400 / 409 |
-| GET | `/api/reports` | logged in | `?status=&incidentTypeId=&locationId=&search=&page=&pageSize=` | 200 page of reports you may see |
-| GET | `/api/reports/my` | logged in | same filters | 200 page of your own reports |
-| GET | `/api/reports/review-queue` | Supervisor, SafetyOfficer | same filters | 200 Pending Review only, urgent first |
-| GET | `/api/reports/{id}` | logged in (if visible) | | 200 detail incl. reviews + `canEdit/canWithdraw/canReview` / 404 |
-| PUT | `/api/reports/{id}` | reporter (while pending), SafetyOfficer | `{ incidentTypeId, locationId, description, occurredAt }` | 200 / 400 / 404 / 409 |
-| DELETE | `/api/reports/{id}` | reporter (while pending), SafetyOfficer | | 204 (withdraw = soft delete) |
-| POST | `/api/reports/{id}/reviews` | Supervisor, SafetyOfficer | `{ decision: "APPROVED" \| "DENIED", comment }` (comment required for DENIED) | 200 / 400 / 404 / 409 |
-| GET | `/api/reports/{id}/audit` | SafetyOfficer, Administrator | | 200 history |
+| POST | `/api/reports` | Worker, Supervisor | `{ clientReportId, typeCode, locationId, description, occurredAt, expectedImageCount?, expectedVoiceNoteCount? }` | **201** new / **200** already had it (retry) / 400 / 409 |
+| GET | `/api/reports/mine` (or `/my`) | logged in | `?status=PENDING_REVIEW&typeCode=&locationId=&search=&page=&pageSize=` | `{ items, total, page, pageSize }` |
+| GET | `/api/reports/{id}` | owner / allowed reviewer | | `{ report }` incl. reviews, attachments, `reviewReason`, `canEdit/canWithdraw/canReview` |
+| PUT | `/api/reports/{id}` | reporter, while Pending Review | `{ typeCode, locationId, description, occurredAt }` | `{ report }` |
+| DELETE | `/api/reports/{id}` | reporter, while Pending Review | | 204 (withdraw = soft delete) |
+| POST | `/api/reports/{id}/attachments` | reporter | multipart: `file`, `attachmentType` (PHOTO / VOICE_NOTE), `clientAttachmentId?`, `capturedAt?` | **201** / **200** same file already uploaded / 400 / 413 (> 25 MB) |
+| GET | `/api/attachments/{id}` | anyone who may see the report | | the file |
 
-Who sees which reports: Worker = own; Supervisor = own + assigned locations; SafetyOfficer/Admin = all.
+### Supervisor
+| Method | URL | Returns |
+|---|---|---|
+| GET | `/api/supervisor/reports?status=PENDING_REVIEW` | reports at your assigned locations (not your own); pending = urgent first |
+| GET | `/api/supervisor/reports/{id}` | `{ report }` |
+| POST | `/api/supervisor/reports/{id}/review` body `{ decision: "APPROVE" \| "DENY", reason }` | `{ report }` / 400 `REASON_REQUIRED` / 409 `ALREADY_REVIEWED` |
+
+### Safety Officer (read-only)
+| Method | URL | Returns |
+|---|---|---|
+| GET | `/api/safety-officer/incidents?status=&locationId=` | Incidents that are pending or approved (denied left out) |
+| GET | `/api/safety-officer/incidents/{id}` | `{ report }` incl. `dashboardUrl` |
+| GET | `/api/reports/{id}/audit` | chronological history |
+
+**Who sees which reports:** everyone their own; Supervisor + their assigned locations; Safety Officer
++ all non-denied Incidents (read-only); Administrator none (accounts and locations only).
 Anything outside that answers 404.
 
-**Offline sync contract for the app:** create a new GUID as `clientReportId` when the report is first
-made on the phone, store it with the local report, and send the **same** value on every retry.
-`201` or `200` both mean "synced": save the returned `reportId` / `reportNumber` and mark it done.
-`409` means the ID was reused for different content (bug on the phone side). Always send `occurredAt`
-with a time zone (`Z` or `+02:00`).
+**Codes:** types `INCIDENT`, `HAZARD`, `NEAR_MISS`; statuses `PENDING_REVIEW`, `APPROVED`, `DENIED`.
+Every response has both the code (`typeCode`, `statusCode`) and the display name.
 
-### Notifications and lookups
+**Errors** always look like `{ "code": "ALREADY_REVIEWED", "message": "..." }`; validation errors add
+`"errors": { "Description": ["..."] }`. 400 bad input, 401 not logged in / expired, 403 wrong role,
+404 not found or not yours, 409 conflict, 413 file too large.
+
+**Offline sync contract:** create one GUID `clientReportId` on the phone when the report is made and
+send the **same** value on every retry. `201` or `200` both mean "synced". Photos: upload after the
+report has synced, using its `reportId`; re-uploading the same file returns `200` with the existing
+attachment (matched by SHA-256), so retries are safe.
+
+### Notifications, lookups, health
 | Method | URL | Who | Returns |
 |---|---|---|---|
 | GET | `/api/notifications?unreadOnly=&page=&pageSize=` | logged in | your alerts, unread + urgent first |
-| PUT | `/api/notifications/{id}/read` | recipient only | 200 / 404 |
-| PUT | `/api/notifications/read-all` | logged in | `{ markedRead }` |
-| GET | `/api/incident-types` | logged in | Hazard / Incident / Near Miss with IDs |
-| GET | `/api/report-statuses` | logged in | status list |
+| POST | `/api/notifications/{id}/read` | recipient only | 200 / 404 |
+| POST | `/api/notifications/read-all` | logged in | `{ markedRead }` |
+| GET | `/api/incident-types` | logged in | `[{ incidentTypeId, typeCode, typeName }]` |
+| GET | `/api/report-statuses` | logged in | `[{ statusId, statusCode, statusName }]` |
+| GET | `/health` | anyone | `{ status: "ok" }` (connection check) |
 
-Alerts are created automatically: a new report notifies the Supervisors of that location
-(`NEW_REPORT`); an Incident also notifies all Safety Officers (`INCIDENT_ALERT`); a review notifies
-the reporter (`REPORT_REVIEWED`).
+Alerts are created automatically: new report -> Supervisors of that location (`NEW_REPORT`);
+Incident -> also all Safety Officers (`INCIDENT_ALERT`); review -> the reporter (`REPORT_REVIEWED`);
+approved Incident -> Safety Officers (`INCIDENT_APPROVED`).
 
 ---
 
@@ -222,16 +241,23 @@ C# property, it is mapped explicitly in `Data/MineSafetyDbContext.cs`:
 - The JWT key is not in `appsettings.json`. Development uses `appsettings.Development.json`
   (dev-only key); anywhere else set the environment variable `Jwt__Key`.
 
-### Known gaps
-- Photo / voice-note attachments (next).
-- Escalation from Supervisor to Safety Officer (D3 user story) is not a separate status yet:
-  Safety Officers already see and can review every report, and Incidents alert them directly.
-- Push notifications (Firebase) not wired; alerts are in-app via `/api/notifications`.
+### Known gaps (agreed as future work)
+- Refresh tokens: tokens last one shift (12 h). Offline reports wait safely on the phone; if the
+  token has expired the worker logs in again and the queue uploads. Deactivation still takes effect
+  immediately (RoleRefresher).
+- Evidence completeness (`expectedImageCount`, blocking review until all files arrive) needs new
+  columns; the counts are accepted in the request but not stored yet. Supervisors see
+  `imageCount` / `voiceNoteCount`.
+- `clientAttachmentId` is accepted but not stored (no column); retries are matched by SHA-256 instead.
+- Push notifications (Firebase): alerts are in-app via `/api/notifications`.
 
-## 7. Connecting the phone later
+## 7. Connecting the phone
+
+Full guide for the Android side: `docs/android-integration.md`.
+Start the API for phones with `dotnet run --launch-profile lan`.
 
 `localhost` only works on the laptop itself. For Banjo's phone or emulator:
 - Android **emulator**: use `http://10.0.2.2:5080` from the app.
-- Real **phone** on the same Wi-Fi: change `applicationUrl` in `Properties/launchSettings.json` to
-  `http://0.0.0.0:5080`, then the app uses `http://<laptop IP>:5080`. Windows Firewall may ask to allow it.
+- Real **phone** on the same Wi-Fi: run `dotnet run --launch-profile lan`, then the app uses
+  `http://<laptop IP>:5080`. Windows Firewall may ask to allow it.
 - Android blocks plain `http://` by default. Banjo must add `android:usesCleartextTraffic="true"` to the `<application>` tag in `AndroidManifest.xml` for development.

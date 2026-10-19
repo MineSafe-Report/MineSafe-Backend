@@ -24,7 +24,7 @@ public class AuthController : ApiControllerBase
     {
         var result = await _auth.LoginAsync(request);
         if (!result.Success)
-            return Unauthorized(new { message = result.Message });   // 401
+            return Unauthorized(new { code = "INVALID_LOGIN", message = result.Message });   // 401
 
         return Ok(result.Value);                                     // 200 + token
     }

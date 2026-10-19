@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using Microsoft.AspNetCore.Http;
 
 namespace MineSafety.Api.Dtos;
 
@@ -12,8 +13,9 @@ public class CreateReportRequest
     [Required]
     public Guid ClientReportId { get; set; }
 
-    [Required]
-    public int IncidentTypeId { get; set; }          // Hazard / Incident / Near Miss (GET /api/incident-types)
+    // Send EITHER typeCode ("INCIDENT", "HAZARD", "NEAR_MISS") OR incidentTypeId.
+    public string? TypeCode { get; set; }
+    public int? IncidentTypeId { get; set; }
 
     [Required]
     public int LocationId { get; set; }              // must be one of the worker's locations
@@ -21,18 +23,21 @@ public class CreateReportRequest
     [Required, MinLength(3), MaxLength(4000)]
     public string Description { get; set; } = "";
 
-    // When it actually happened. Send it with a time zone, e.g. "2026-10-13T09:30:00Z"
-    // or "2026-10-13T11:30:00+02:00". The server stores it in UTC.
+    // When it actually happened, in UTC, e.g. "2026-10-19T08:30:00Z".
     [Required]
     public DateTime OccurredAt { get; set; }
+
+    // Optional: how many photos / voice notes the phone will upload after this.
+    // Accepted for the agreed contract; evidence tracking is planned (see README known gaps).
+    public int? ExpectedImageCount { get; set; }
+    public int? ExpectedVoiceNoteCount { get; set; }
 }
 
-// PUT /api/reports/5 : the reporter fixes their report while it is still Pending Review,
-// or a Safety Officer corrects it at any time. Send the full new values.
+// PUT /api/reports/5 : the reporter fixes their own report while it is still Pending Review.
 public class UpdateReportRequest
 {
-    [Required]
-    public int IncidentTypeId { get; set; }
+    public string? TypeCode { get; set; }
+    public int? IncidentTypeId { get; set; }
 
     [Required]
     public int LocationId { get; set; }
@@ -44,34 +49,61 @@ public class UpdateReportRequest
     public DateTime OccurredAt { get; set; }
 }
 
-// POST /api/reports/5/reviews : a supervisor approves or denies.
+// POST .../review : a supervisor approves or denies.
 public class CreateReviewRequest
 {
-    // "APPROVED" or "DENIED"
-    [Required, RegularExpression("^(APPROVED|DENIED)$", ErrorMessage = "Decision must be APPROVED or DENIED.")]
+    // "APPROVE" / "DENY" (also accepts "APPROVED" / "DENIED")
+    [Required]
     public string Decision { get; set; } = "";
 
-    // Required when the decision is DENIED (the denial reason from D3).
+    // The denial reason. Required when denying. ("comment" is accepted too.)
+    [MaxLength(1000)]
+    public string? Reason { get; set; }
+
     [MaxLength(1000)]
     public string? Comment { get; set; }
 }
 
+// POST /api/reports/5/attachments  (multipart/form-data)
+public class UploadAttachmentRequest
+{
+    [Required]
+    public IFormFile File { get; set; } = null!;
+
+    // "PHOTO" (or "IMAGE") or "VOICE_NOTE"
+    [Required]
+    public string AttachmentType { get; set; } = "";
+
+    // The phone's own ID for this file. Retrying the same file is safe either way:
+    // the server recognises an identical file on the same report by its SHA-256 fingerprint.
+    public string? ClientAttachmentId { get; set; }
+
+    public DateTime? CapturedAt { get; set; }
+}
+
 // ---------- WHAT THE API SENDS BACK ----------
 
-// One line in a list (My Reports, the review queue).
+// One line in a list (My Reports, the review queue, the incident list).
 public class ReportSummaryDto
 {
     public int ReportId { get; set; }
     public string ReportNumber { get; set; } = "";       // e.g. MS-2026-00042
     public Guid ClientReportId { get; set; }             // lets the phone match it to its local copy
-    public string IncidentType { get; set; } = "";
-    public bool IsUrgent { get; set; }                   // true for types that trigger an alert (Incident)
+    public string TypeCode { get; set; } = "";           // INCIDENT / HAZARD / NEAR_MISS
+    public string IncidentType { get; set; } = "";       // display name: Incident / Hazard / Near Miss
+    public bool IsUrgent { get; set; }
     public int LocationId { get; set; }
+    public string LocationCode { get; set; } = "";
     public string LocationName { get; set; } = "";
-    public string Status { get; set; } = "";             // Pending Review / Approved / Denied
+    public string StatusCode { get; set; } = "";         // PENDING_REVIEW / APPROVED / DENIED
+    public string Status { get; set; } = "";             // display name
+    public DateTime? StatusUpdatedAt { get; set; }       // when the status last changed
+    public string? ReviewReason { get; set; }            // the denial reason when DENIED, else null
     public string ReporterName { get; set; } = "";
     public DateTime OccurredAt { get; set; }
     public DateTime? SubmittedAt { get; set; }
+    public int ImageCount { get; set; }
+    public int VoiceNoteCount { get; set; }
 }
 
 // Everything about one report (the report detail screen).
@@ -84,11 +116,21 @@ public class ReportDetailDto : ReportSummaryDto
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public List<ReviewDto> Reviews { get; set; } = new();
+    public List<AttachmentDto> Attachments { get; set; } = new();
+
+    // Safety Officers only: link to this report on the web dashboard (no token in it).
+    public string? DashboardUrl { get; set; }
 
     // What THIS user may do with it, so the app knows which buttons to show.
     public bool CanEdit { get; set; }
     public bool CanWithdraw { get; set; }
     public bool CanReview { get; set; }
+}
+
+// Single reports are always returned wrapped: { "report": { ... } }
+public class ReportEnvelope
+{
+    public ReportDetailDto Report { get; set; } = new();
 }
 
 // The answer to POST /api/reports
@@ -103,16 +145,33 @@ public class SubmitReportResponse
 public class ReviewDto
 {
     public int ReviewId { get; set; }
-    public string Decision { get; set; } = "";
+    public string Decision { get; set; } = "";           // APPROVED / DENIED
     public string? Comment { get; set; }
     public string ReviewerName { get; set; } = "";
     public DateTime ReviewedAt { get; set; }
 }
 
+// File info only. Never a server path: the file itself comes from GET /api/attachments/{id}.
+public class AttachmentDto
+{
+    public int AttachmentId { get; set; }
+    public string AttachmentType { get; set; } = "";     // PHOTO / VOICE_NOTE
+    public string OriginalFileName { get; set; } = "";
+    public string MimeType { get; set; } = "";
+    public long SizeBytes { get; set; }
+    public DateTime UploadedAt { get; set; }
+}
+
+public class UploadAttachmentResponse
+{
+    public bool AlreadyExisted { get; set; }             // true = same file was already uploaded
+    public AttachmentDto Attachment { get; set; } = new();
+}
+
 public class AuditEntryDto
 {
     public int AuditLogId { get; set; }
-    public string Action { get; set; } = "";             // CREATED, EDITED, WITHDRAWN, APPROVED, DENIED
+    public string Action { get; set; } = "";             // CREATED, EDITED, WITHDRAWN, APPROVED, DENIED, ATTACHMENT_ADDED
     public string ActorName { get; set; } = "";
     public DateTime ActionAt { get; set; }
     public string? OldValueJson { get; set; }
@@ -123,6 +182,7 @@ public class AuditEntryDto
 public class IncidentTypeDto
 {
     public int IncidentTypeId { get; set; }
+    public string TypeCode { get; set; } = "";
     public string TypeName { get; set; } = "";
     public bool TriggersImmediateAlert { get; set; }
 }
@@ -130,6 +190,7 @@ public class IncidentTypeDto
 public class ReportStatusDto
 {
     public int StatusId { get; set; }
+    public string StatusCode { get; set; } = "";
     public string StatusName { get; set; } = "";
     public bool IsTerminal { get; set; }
 }

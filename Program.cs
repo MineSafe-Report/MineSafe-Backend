@@ -4,6 +4,7 @@
 
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -28,6 +29,7 @@ builder.Services.AddScoped<IAccountService, AccountService>();
 builder.Services.AddScoped<IReportService, ReportService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<ILookupService, LookupService>();
+builder.Services.AddScoped<IAttachmentService, AttachmentService>();
 
 // The JWT signing key is a secret, so it is NOT in appsettings.json (which is committed).
 // In development it comes from appsettings.Development.json; anywhere else, from an
@@ -65,7 +67,19 @@ builder.Services
     });
 builder.Services.AddAuthorization();
 
-builder.Services.AddControllers();
+// Controllers. The extra part makes validation errors (missing/too-long fields) use the same
+// error shape as everything else: { "code": "VALIDATION_FAILED", "message": "...", "errors": { field: [..] } }
+builder.Services.AddControllers().ConfigureApiBehaviorOptions(options =>
+{
+    options.InvalidModelStateResponseFactory = context => new BadRequestObjectResult(new
+    {
+        code = "VALIDATION_FAILED",
+        message = "Some fields are missing or invalid.",
+        errors = context.ModelState
+            .Where(e => e.Value != null && e.Value.Errors.Count > 0)
+            .ToDictionary(e => e.Key, e => e.Value!.Errors.Select(x => x.ErrorMessage).ToArray())
+    });
+});
 
 // Swagger: the test page. The extra setup adds an "Authorize" button where you paste a token.
 builder.Services.AddEndpointsApiExplorer();
@@ -125,5 +139,8 @@ app.UseCors();
 app.UseAuthentication();   // 1st: WHO are you? (reads the token, then RoleRefresher)
 app.UseAuthorization();    // 2nd: are you ALLOWED? (checks [Authorize] and roles)
 app.MapControllers();      // 3rd: hand the request to the matching controller method
+
+// GET /health : no login needed. The app calls this to check "can I reach the server right now?"
+app.MapGet("/health", () => Results.Ok(new { status = "ok", time = DateTime.UtcNow }));
 
 app.Run();
