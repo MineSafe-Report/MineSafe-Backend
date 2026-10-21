@@ -180,7 +180,18 @@ deactivate themselves or remove their own Administrator role.
 |---|---|---|
 | GET | `/api/supervisor/reports?status=PENDING_REVIEW` | reports at your assigned locations (not your own); pending = urgent first |
 | GET | `/api/supervisor/reports/{id}` | `{ report }` |
-| POST | `/api/supervisor/reports/{id}/review` body `{ decision: "APPROVE" \| "DENY", reason }` | `{ report }` / 400 `REASON_REQUIRED` / 409 `ALREADY_REVIEWED` |
+| POST | `/api/supervisor/reports/{id}/review` body `{ decision: "APPROVE" \| "DENY", reason }` | `{ report }` / 400 `REASON_REQUIRED` / 409 `ALREADY_REVIEWED` / 409 `EVIDENCE_INCOMPLETE` (approve only) |
+
+**Supervisor reports are approved automatically.** A supervisor can't review their own report, so
+when the reporter has the Supervisor role (checked on the server) the report becomes `APPROVED`
+as soon as its evidence is complete: at once if `expectedImageCount` and `expectedVoiceNoteCount`
+are 0, otherwise when the last expected file uploads. No `ReportReviews` row is written (nobody
+reviewed it); the audit log records `AUTO_APPROVED` and reports show `autoApproved: true`.
+Approved Incidents notify the Safety Officers (`INCIDENT_APPROVED`) exactly once. Nobody can
+APPROVE any report while its expected files are still uploading.
+
+**Stuck supervisor reports (one-time):** `POST /api/admin/maintenance/stuck-supervisor-reports`
+(Administrator), see `docs/STUCK_SUPERVISOR_REPORTS.md`.
 
 ### Safety Officer (read-only)
 | Method | URL | Returns |
@@ -245,11 +256,17 @@ C# property, it is mapped explicitly in `Data/MineSafetyDbContext.cs`:
 - Refresh tokens: tokens last one shift (12 h). Offline reports wait safely on the phone; if the
   token has expired the worker logs in again and the queue uploads. Deactivation still takes effect
   immediately (RoleRefresher).
-- Evidence completeness (`expectedImageCount`, blocking review until all files arrive) needs new
-  columns; the counts are accepted in the request but not stored yet. Supervisors see
-  `imageCount` / `voiceNoteCount`.
-- `clientAttachmentId` is accepted but not stored (no column); retries are matched by SHA-256 instead.
+- Evidence tracking needs `database/migrations/003_AddEvidenceTracking.sql` on existing databases
+  (fresh databases get it from the schema scripts).
 - Push notifications (Firebase): alerts are in-app via `/api/notifications`.
+
+## 6b. Automated tests
+
+```
+dotnet test tests/MineSafetyApi.Tests
+```
+Runs the business-rule tests (supervisor auto-approval, retries, evidence checks) against an
+in-memory database. No SQL Server needed.
 
 ## 7. Connecting the phone
 

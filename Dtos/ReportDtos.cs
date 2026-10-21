@@ -20,16 +20,21 @@ public class CreateReportRequest
     [Required]
     public int LocationId { get; set; }              // must be one of the worker's locations
 
-    [Required, MinLength(3), MaxLength(4000)]
-    public string Description { get; set; } = "";
+    // May be empty when the report has a voice note instead of typed text.
+    [MaxLength(4000)]
+    public string? Description { get; set; }
 
     // When it actually happened, in UTC, e.g. "2026-10-19T08:30:00Z".
     [Required]
     public DateTime OccurredAt { get; set; }
 
-    // Optional: how many photos / voice notes the phone will upload after this.
-    // Accepted for the agreed contract; evidence tracking is planned (see README known gaps).
+    // How many photos / voice notes the phone WILL upload after this report (0 if none).
+    // Stored with the report. The evidence is "complete" once they have all arrived:
+    //  - a Supervisor's own report is approved automatically at that moment
+    //  - nobody can APPROVE a report before that moment
+    [Range(0, 50)]
     public int? ExpectedImageCount { get; set; }
+    [Range(0, 50)]
     public int? ExpectedVoiceNoteCount { get; set; }
 }
 
@@ -42,8 +47,8 @@ public class UpdateReportRequest
     [Required]
     public int LocationId { get; set; }
 
-    [Required, MinLength(3), MaxLength(4000)]
-    public string Description { get; set; } = "";
+    [MaxLength(4000)]
+    public string? Description { get; set; }
 
     [Required]
     public DateTime OccurredAt { get; set; }
@@ -74,9 +79,14 @@ public class UploadAttachmentRequest
     [Required]
     public string AttachmentType { get; set; } = "";
 
-    // The phone's own ID for this file. Retrying the same file is safe either way:
-    // the server recognises an identical file on the same report by its SHA-256 fingerprint.
+    // The phone's own stable ID for this file (e.g. "image-12", "voice-4"). Sending the same ID
+    // again returns the original attachment. Without an ID, an identical file on the same report
+    // is recognised by its SHA-256 fingerprint instead. ("localAttachmentId" is accepted too.)
+    [MaxLength(100)]
     public string? ClientAttachmentId { get; set; }
+
+    [MaxLength(100)]
+    public string? LocalAttachmentId { get; set; }
 
     public DateTime? CapturedAt { get; set; }
 }
@@ -102,8 +112,12 @@ public class ReportSummaryDto
     public string ReporterName { get; set; } = "";
     public DateTime OccurredAt { get; set; }
     public DateTime? SubmittedAt { get; set; }
-    public int ImageCount { get; set; }
-    public int VoiceNoteCount { get; set; }
+    public int ImageCount { get; set; }                  // photos received so far
+    public int VoiceNoteCount { get; set; }              // voice notes received so far
+    public int? ExpectedImageCount { get; set; }         // photos the phone said it will send
+    public int? ExpectedVoiceNoteCount { get; set; }
+    public bool EvidenceComplete { get; set; }           // everything expected has arrived
+    public bool AutoApproved { get; set; }               // approved automatically (a Supervisor's own report)
 }
 
 // Everything about one report (the report detail screen).
@@ -166,6 +180,41 @@ public class UploadAttachmentResponse
 {
     public bool AlreadyExisted { get; set; }             // true = same file was already uploaded
     public AttachmentDto Attachment { get; set; } = new();
+
+    // The report's state after this upload (e.g. a Supervisor's report becomes APPROVED
+    // when its last expected file arrives).
+    public string ReportStatusCode { get; set; } = "";
+    public bool EvidenceComplete { get; set; }
+}
+
+// One-time maintenance: Supervisor reports stuck in Pending Review.
+public class StuckReportDto
+{
+    public int ReportId { get; set; }
+    public string ReportNumber { get; set; } = "";
+    public string ReporterWorkerId { get; set; } = "";
+    public string LocationName { get; set; } = "";
+    public string TypeCode { get; set; } = "";
+    public DateTime? SubmittedAt { get; set; }
+    public int? ExpectedImageCount { get; set; }
+    public int? ExpectedVoiceNoteCount { get; set; }
+    public int ImageCount { get; set; }
+    public int VoiceNoteCount { get; set; }
+
+    // APPROVED | WOULD_APPROVE | WAITING_FOR_EVIDENCE | NEEDS_CONFIRMATION
+    public string Action { get; set; } = "";
+    public string Explanation { get; set; } = "";
+}
+
+public class StuckReportsRequest
+{
+    // true (default) = only report what WOULD happen; nothing is changed.
+    public bool DryRun { get; set; } = true;
+
+    // Reports created before migration 003 have no expected counts, so the server can't know
+    // whether evidence is still missing. Approve those ONLY if listed here, after a person has
+    // checked them (e.g. the supervisor's phone shows nothing left to upload).
+    public List<int> ConfirmLegacyReportIds { get; set; } = new();
 }
 
 public class AuditEntryDto

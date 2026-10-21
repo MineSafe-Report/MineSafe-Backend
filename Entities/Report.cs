@@ -30,6 +30,12 @@ public class Report
 
     public DateTime OccurredAt { get; set; }         // when it actually happened underground (UTC)
 
+    // How many photos / voice notes the phone said it will upload after the report itself.
+    // The report's evidence is "complete" once that many have arrived. NULL = unknown
+    // (reports created before migration 003), treated as "nothing expected".
+    public int? ExpectedImageCount { get; set; }
+    public int? ExpectedVoiceNoteCount { get; set; }
+
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; }          // when the server row was created
     public DateTime? UpdatedAt { get; set; }

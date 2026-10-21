@@ -21,6 +21,16 @@ public interface IReportService
     // Shared with AttachmentService so both use the SAME "who may see this report" rule.
     IQueryable<Report> VisibleTo(CurrentUser user);
     void AddAudit(int reportId, int actorId, string action, object? before, object? after);
+
+    // Called after every evidence upload: approves a Supervisor's own report once all of its
+    // expected photos / voice notes have arrived. Safe to call any number of times.
+    Task TryAutoApproveAsync(int reportId, CurrentUser reporter);
+
+    // The report's status code + whether its evidence is complete (for the upload response).
+    Task<(string StatusCode, bool EvidenceComplete)> GetEvidenceStateAsync(int reportId);
+
+    // One-time clean-up of Supervisor reports stuck in Pending Review (Administrator only).
+    Task<List<StuckReportDto>> ResolveStuckSupervisorReportsAsync(StuckReportsRequest request, int adminAccountId);
 }
 
 // Filters for the report lists. Status accepts a code (PENDING_REVIEW) or a name (Pending Review).
@@ -43,6 +53,10 @@ public class ReportListFilter
 // load, check rules, change, save, return a DTO.
 public class ReportService : IReportService
 {
+    // Audit actions for approvals that were NOT a manual supervisor review.
+    public const string AutoApprovedAction = "AUTO_APPROVED";
+    public const string LegacyAutoApprovedAction = "AUTO_APPROVED_BY_ADMIN_CHECK";
+
     private readonly MineSafetyDbContext _db;
     private readonly IConfiguration _config;
 
@@ -120,8 +134,11 @@ public class ReportService : IReportService
             IncidentTypeId = incidentType.IncidentTypeId,
             LocationId = location.LocationId,
             StatusId = pendingStatusId,
-            Description = request.Description.Trim(),
+            Description = (request.Description ?? "").Trim(),
             OccurredAt = occurredAt,
+            // No count sent = nothing expected. Stored so "evidence complete" survives restarts.
+            ExpectedImageCount = request.ExpectedImageCount ?? 0,
+            ExpectedVoiceNoteCount = request.ExpectedVoiceNoteCount ?? 0,
             IsActive = true,
             CreatedAt = now,
             SubmittedAt = now,
@@ -142,6 +159,15 @@ public class ReportService : IReportService
             report.ReportNumber = $"MS-{now:yyyy}-{report.ReportId:D5}";
             AddAudit(report.ReportId, user.AccountId, "CREATED", null, Snapshot(report));
             await AddNewReportNotificationsAsync(report, incidentType, location, user.AccountId);
+
+            // A Supervisor can't review their own report, so their reports are approved
+            // automatically. With no photos / voice notes expected, that happens right now,
+            // in the same transaction. Otherwise it happens when the last file arrives
+            // (TryAutoApproveAsync, called by AttachmentService).
+            if (IsSupervisor(user) && CanAutoApprove(report, receivedImages: 0, receivedVoiceNotes: 0))
+                await ApplyAutoApprovalAsync(report, incidentType, location, user.AccountId, AutoApprovedAction,
+                    "Submitted by a supervisor; approved automatically with no evidence outstanding.");
+
             await _db.SaveChangesAsync();
 
             await transaction.CommitAsync();
@@ -174,7 +200,7 @@ public class ReportService : IReportService
         var sameReport = existing.ReporterAccountId == user.AccountId
             && existing.IncidentTypeId == incidentTypeId
             && existing.LocationId == request.LocationId
-            && existing.Description == request.Description.Trim()
+            && existing.Description == (request.Description ?? "").Trim()
             && Math.Abs((existing.OccurredAt - occurredAt).TotalSeconds) < 1;
 
         if (!sameReport)
@@ -330,7 +356,7 @@ public class ReportService : IReportService
 
         report.IncidentTypeId = type.IncidentTypeId;
         report.LocationId = request.LocationId;
-        report.Description = request.Description.Trim();
+        report.Description = (request.Description ?? "").Trim();
         report.OccurredAt = occurredAt;
         report.UpdatedAt = DateTime.UtcNow;
 
@@ -393,6 +419,13 @@ public class ReportService : IReportService
 
         var reason = (request.Reason ?? request.Comment)?.Trim();
         var denied = decision == ReviewDecisions.Denied;
+
+        // Nobody may APPROVE while promised photos / voice notes are still uploading.
+        // (Denying stays possible, e.g. when the evidence is never going to arrive.)
+        if (!denied && !EvidenceComplete(report))
+            return ServiceResult<ReportDetailDto>.Conflict(
+                $"This report is still waiting for evidence ({MissingEvidenceText(report)}). Try again once it has uploaded.",
+                "EVIDENCE_INCOMPLETE");
         if (denied && string.IsNullOrWhiteSpace(reason))
             return ServiceResult<ReportDetailDto>.BadRequest("A reason is required when denying a report.", "REASON_REQUIRED");
 
@@ -474,6 +507,195 @@ public class ReportService : IReportService
     //  SMALL HELPERS
     // =====================================================================
 
+    // =====================================================================
+    //  AUTOMATIC APPROVAL OF A SUPERVISOR'S OWN REPORT
+    // =====================================================================
+    // Rules:
+    //  - Only for reports whose reporter is a Supervisor (decided on the SERVER from the account's
+    //    current roles, never from anything the app sends).
+    //  - Only once every expected photo and voice note has arrived.
+    //  - Only from Pending Review, so retries and duplicate uploads can never approve twice.
+    //  - No ReportReviews row is written (nobody reviewed it); the audit log says AUTO_APPROVED.
+    public async Task TryAutoApproveAsync(int reportId, CurrentUser reporter)
+    {
+        if (!IsSupervisor(reporter))
+            return;
+
+        var report = await _db.Reports
+            .Include(r => r.IncidentType)
+            .Include(r => r.Location)
+            .Include(r => r.Status)
+            .Include(r => r.Attachments)
+            .FirstOrDefaultAsync(r => r.ReportId == reportId && r.IsActive && r.ReporterAccountId == reporter.AccountId);
+
+        if (report == null || report.Status.StatusName != ReportStatusNames.PendingReview)
+            return;
+
+        var (images, voiceNotes) = ReceivedCounts(report);
+        if (!CanAutoApprove(report, images, voiceNotes))
+            return;
+
+        await ApplyAutoApprovalAsync(report, report.IncidentType, report.Location, reporter.AccountId, AutoApprovedAction,
+            "Submitted by a supervisor; approved automatically once all expected evidence had uploaded.");
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            // Another request changed this report at the same moment (e.g. the final two uploads
+            // arrived together and the other one approved it). Nothing to do: it's handled once.
+            _db.ChangeTracker.Clear();
+        }
+    }
+
+    public async Task<(string StatusCode, bool EvidenceComplete)> GetEvidenceStateAsync(int reportId)
+    {
+        var report = await _db.Reports.AsNoTracking()
+            .Include(r => r.Status)
+            .Include(r => r.Attachments)
+            .FirstAsync(r => r.ReportId == reportId);
+        return (Codes.From(report.Status.StatusName), EvidenceComplete(report));
+    }
+
+    // Status -> Approved, audit row, and (for Incidents) the Safety Officer notification.
+    // Does NOT save: the caller saves, so it lands in the caller's transaction.
+    private async Task ApplyAutoApprovalAsync(Report report, IncidentType type, Location location,
+                                              int actorId, string auditAction, string reason)
+    {
+        var before = Snapshot(report);
+        report.StatusId = await GetStatusIdAsync(ReportStatusNames.Approved);
+        report.UpdatedAt = DateTime.UtcNow;
+
+        var after = Snapshot(report);
+        after["status"] = ReportStatusNames.Approved;
+        after["autoApproved"] = true;
+        after["reason"] = reason;
+        AddAudit(report.ReportId, actorId, auditAction, before, after);
+
+        if (type.TriggersImmediateAlert)
+        {
+            foreach (var officerId in (await SafetyOfficerIdsAsync()).Distinct().Where(o => o != report.ReporterAccountId))
+                AddNotification(officerId, report.ReportId, NotificationTypes.IncidentApproved,
+                    $"Incident {report.ReportNumber} at {location.LocationName} was approved automatically (reported by a supervisor).");
+        }
+    }
+
+    private static bool IsSupervisor(CurrentUser user) => user.IsInRole(RoleNames.Supervisor);
+
+    // Auto-approval needs KNOWN expectations (reports from before migration 003 have none)
+    // and every expected file received.
+    private static bool CanAutoApprove(Report r, int receivedImages, int receivedVoiceNotes) =>
+        r.ExpectedImageCount.HasValue && r.ExpectedVoiceNoteCount.HasValue
+        && receivedImages >= r.ExpectedImageCount.Value
+        && receivedVoiceNotes >= r.ExpectedVoiceNoteCount.Value;
+
+    private static (int Images, int VoiceNotes) ReceivedCounts(Report r)
+    {
+        var files = r.Attachments.Where(a => !a.IsDeleted).ToList();
+        return (files.Count(a => a.AttachmentType == "PHOTO"), files.Count(a => a.AttachmentType == "VOICE_NOTE"));
+    }
+
+    // Unknown expectations count as "nothing outstanding".
+    private static bool EvidenceComplete(Report r)
+    {
+        var (images, voiceNotes) = ReceivedCounts(r);
+        return images >= (r.ExpectedImageCount ?? 0) && voiceNotes >= (r.ExpectedVoiceNoteCount ?? 0);
+    }
+
+    private static string MissingEvidenceText(Report r)
+    {
+        var (images, voiceNotes) = ReceivedCounts(r);
+        var parts = new List<string>();
+        var missingImages = (r.ExpectedImageCount ?? 0) - images;
+        var missingVoice = (r.ExpectedVoiceNoteCount ?? 0) - voiceNotes;
+        if (missingImages > 0) parts.Add($"{missingImages} photo(s)");
+        if (missingVoice > 0) parts.Add($"{missingVoice} voice note(s)");
+        return string.Join(" and ", parts);
+    }
+
+    // =====================================================================
+    //  ONE-TIME CLEAN-UP: Supervisor reports stuck in Pending Review
+    // =====================================================================
+    // Finds active Pending Review reports whose reporter currently has the Supervisor role.
+    //  - Expected counts known + all evidence received  -> approve (AUTO_APPROVED)
+    //  - Expected counts known + evidence missing       -> leave; it approves itself when it arrives
+    //  - Created before migration 003 (counts unknown)  -> only approved if an administrator lists
+    //    its ID in ConfirmLegacyReportIds after checking it (AUTO_APPROVED_BY_ADMIN_CHECK, actor = admin)
+    // DryRun (the default) changes nothing and just reports what would happen.
+    public async Task<List<StuckReportDto>> ResolveStuckSupervisorReportsAsync(StuckReportsRequest request, int adminAccountId)
+    {
+        var supervisorIds = await _db.AccountRoles
+            .Where(ar => ar.IsActive && ar.Account.IsActive && ar.Role.RoleName == RoleNames.Supervisor)
+            .Select(ar => ar.AccountId)
+            .ToListAsync();
+
+        var stuck = await _db.Reports
+            .Include(r => r.Reporter)
+            .Include(r => r.IncidentType)
+            .Include(r => r.Location)
+            .Include(r => r.Status)
+            .Include(r => r.Attachments)
+            .Where(r => r.IsActive && r.Status.StatusName == ReportStatusNames.PendingReview
+                        && supervisorIds.Contains(r.ReporterAccountId))
+            .OrderBy(r => r.SubmittedAt)
+            .ToListAsync();
+
+        var results = new List<StuckReportDto>();
+        foreach (var report in stuck)
+        {
+            var (images, voiceNotes) = ReceivedCounts(report);
+            var line = new StuckReportDto
+            {
+                ReportId = report.ReportId,
+                ReportNumber = report.ReportNumber,
+                ReporterWorkerId = report.Reporter.WorkerId,
+                LocationName = report.Location.LocationName,
+                TypeCode = Codes.From(report.IncidentType.TypeName),
+                SubmittedAt = report.SubmittedAt,
+                ExpectedImageCount = report.ExpectedImageCount,
+                ExpectedVoiceNoteCount = report.ExpectedVoiceNoteCount,
+                ImageCount = images,
+                VoiceNoteCount = voiceNotes
+            };
+
+            var legacy = !report.ExpectedImageCount.HasValue || !report.ExpectedVoiceNoteCount.HasValue;
+            if (!legacy && !CanAutoApprove(report, images, voiceNotes))
+            {
+                line.Action = "WAITING_FOR_EVIDENCE";
+                line.Explanation = $"Still waiting for {MissingEvidenceText(report)}. It approves itself when the upload arrives.";
+            }
+            else if (legacy && !request.ConfirmLegacyReportIds.Contains(report.ReportId))
+            {
+                line.Action = "NEEDS_CONFIRMATION";
+                line.Explanation = $"Created before evidence tracking, so the server can't tell if uploads are missing. " +
+                                   $"Received {images} photo(s), {voiceNotes} voice note(s). Check with the reporter, then list this ID in confirmLegacyReportIds.";
+            }
+            else if (request.DryRun)
+            {
+                line.Action = "WOULD_APPROVE";
+                line.Explanation = legacy ? "Confirmed by an administrator." : "All expected evidence has arrived.";
+            }
+            else
+            {
+                if (legacy)
+                    await ApplyAutoApprovalAsync(report, report.IncidentType, report.Location, adminAccountId, LegacyAutoApprovedAction,
+                        "Supervisor report created before evidence tracking; approved after an administrator confirmed its evidence.");
+                else
+                    await ApplyAutoApprovalAsync(report, report.IncidentType, report.Location, report.ReporterAccountId, AutoApprovedAction,
+                        "Submitted by a supervisor; approved automatically (one-time clean-up) once all expected evidence had uploaded.");
+                line.Action = "APPROVED";
+                line.Explanation = "Approved.";
+            }
+            results.Add(line);
+        }
+
+        if (!request.DryRun)
+            await _db.SaveChangesAsync();      // all approvals, audit rows and notifications together
+
+        return results;
+    }
+
     // Only the reporter, only while it's still waiting for review.
     private static bool CanEdit(Report report, CurrentUser user) =>
         report.ReporterAccountId == user.AccountId && report.Status.StatusName == ReportStatusNames.PendingReview;
@@ -544,6 +766,8 @@ public class ReportService : IReportService
         ["statusId"] = r.StatusId,
         ["description"] = r.Description,
         ["occurredAt"] = r.OccurredAt,
+        ["expectedImageCount"] = r.ExpectedImageCount,
+        ["expectedVoiceNoteCount"] = r.ExpectedVoiceNoteCount,
         ["isActive"] = r.IsActive
     };
 
@@ -577,13 +801,20 @@ public class ReportService : IReportService
         dto.LocationName = r.Location.LocationName;
         dto.StatusCode = Codes.From(r.Status.StatusName);
         dto.Status = r.Status.StatusName;
-        dto.StatusUpdatedAt = lastReview?.ReviewedAt ?? r.SubmittedAt;
+        dto.StatusUpdatedAt = lastReview?.ReviewedAt
+            ?? (r.Status.StatusName == ReportStatusNames.PendingReview ? r.SubmittedAt : r.UpdatedAt ?? r.SubmittedAt);
         dto.ReviewReason = lastReview?.Decision == ReviewDecisions.Denied ? lastReview.ReviewComment : null;
         dto.ReporterName = r.Reporter.FullName;
         dto.OccurredAt = r.OccurredAt;
         dto.SubmittedAt = r.SubmittedAt;
         dto.ImageCount = files.Count(a => a.AttachmentType == "PHOTO");
         dto.VoiceNoteCount = files.Count(a => a.AttachmentType == "VOICE_NOTE");
+        dto.ExpectedImageCount = r.ExpectedImageCount;
+        dto.ExpectedVoiceNoteCount = r.ExpectedVoiceNoteCount;
+        dto.EvidenceComplete = EvidenceComplete(r);
+        // Approved, but no supervisor approved it in ReportReviews = approved automatically.
+        dto.AutoApproved = r.Status.StatusName == ReportStatusNames.Approved
+                           && !r.Reviews.Any(rv => rv.Decision == ReviewDecisions.Approved);
         return dto;
     }
 

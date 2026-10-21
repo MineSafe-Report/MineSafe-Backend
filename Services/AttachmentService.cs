@@ -81,12 +81,15 @@ public class AttachmentService : IAttachmentService
         }
         var hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
 
-        // 4. RETRY SAFETY: the same file on the same report already uploaded? Hand that one back.
-        //    (Same idea as clientReportId, using the file's fingerprint instead.)
-        var existing = await _db.ReportAttachments.AsNoTracking()
-            .FirstOrDefaultAsync(a => a.ReportId == reportId && a.Sha256Hash == hash && !a.IsDeleted);
+        // 4. RETRY SAFETY: already got this upload? Hand the original back (and still run the
+        //    auto-approval check, in case the earlier attempt stopped before it).
+        //    With a client ID: match on that ID. Without one: match on the file's fingerprint.
+        var clientId = (request.ClientAttachmentId ?? request.LocalAttachmentId)?.Trim();
+        if (string.IsNullOrEmpty(clientId)) clientId = null;
+
+        var existing = await FindExistingAsync(reportId, clientId, hash);
         if (existing != null)
-            return ServiceResult<UploadAttachmentResponse>.Ok(new UploadAttachmentResponse { AlreadyExisted = true, Attachment = ToDto(existing) });
+            return ServiceResult<UploadAttachmentResponse>.Ok(await BuildResponseAsync(existing, alreadyExisted: true, user));
 
         // 5. Save the file under a name WE choose (never the phone's file name or path).
         var extension = Path.GetExtension(file.FileName);
@@ -107,6 +110,7 @@ public class AttachmentService : IAttachmentService
             MimeType = mime,
             SizeBytes = bytes.LongLength,
             Sha256Hash = hash,
+            ClientAttachmentId = clientId,
             UploadedByAccountId = user.AccountId,     // from the token, never from the app
             UploadedAt = DateTime.UtcNow,
             IsDeleted = false
@@ -119,13 +123,45 @@ public class AttachmentService : IAttachmentService
         {
             await _db.SaveChangesAsync();
         }
+        catch (DbUpdateException) when (clientId != null)
+        {
+            // The same upload arrived twice at the same moment; the database's unique rule on
+            // (report, client ID) stopped this copy. Answer like a normal retry.
+            File.Delete(fullPath);
+            _db.ChangeTracker.Clear();
+            var winner = await FindExistingAsync(reportId, clientId, hash);
+            if (winner == null) throw;
+            return ServiceResult<UploadAttachmentResponse>.Ok(await BuildResponseAsync(winner, alreadyExisted: true, user));
+        }
         catch
         {
             File.Delete(fullPath);    // don't leave an orphan file if the database save failed
             throw;
         }
 
-        return ServiceResult<UploadAttachmentResponse>.Ok(new UploadAttachmentResponse { AlreadyExisted = false, Attachment = ToDto(attachment) });
+        return ServiceResult<UploadAttachmentResponse>.Ok(await BuildResponseAsync(attachment, alreadyExisted: false, user));
+    }
+
+    private Task<ReportAttachment?> FindExistingAsync(int reportId, string? clientId, string hash) =>
+        clientId != null
+            ? _db.ReportAttachments.AsNoTracking()
+                .FirstOrDefaultAsync(a => a.ReportId == reportId && a.ClientAttachmentId == clientId && !a.IsDeleted)
+            : _db.ReportAttachments.AsNoTracking()
+                .FirstOrDefaultAsync(a => a.ReportId == reportId && a.Sha256Hash == hash && !a.IsDeleted);
+
+    // After every upload (new or repeated): a Supervisor's own report is approved automatically
+    // if this was the last expected file. Then report the report's current state back.
+    private async Task<UploadAttachmentResponse> BuildResponseAsync(ReportAttachment attachment, bool alreadyExisted, CurrentUser user)
+    {
+        await _reports.TryAutoApproveAsync(attachment.ReportId, user);
+        var (statusCode, evidenceComplete) = await _reports.GetEvidenceStateAsync(attachment.ReportId);
+        return new UploadAttachmentResponse
+        {
+            AlreadyExisted = alreadyExisted,
+            Attachment = ToDto(attachment),
+            ReportStatusCode = statusCode,
+            EvidenceComplete = evidenceComplete
+        };
     }
 
     public async Task<ServiceResult<(string Path, string MimeType, string FileName)>> GetFileAsync(int attachmentId, CurrentUser user)

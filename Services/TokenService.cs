@@ -25,7 +25,10 @@ public class TokenService : ITokenService
     public (string Token, DateTime ExpiresAt) CreateToken(Account account, IReadOnlyList<string> roleNames)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]!));
-        var expiresAt = DateTime.UtcNow.AddHours(_config.GetValue("Jwt:ExpiryHours", 12));
+        // Whole seconds only, so the JSON is "2026-10-20T06:30:00Z" (the app parses that format).
+        var now = DateTime.UtcNow;
+        var expiresAt = new DateTime(now.Year, now.Month, now.Day, now.Hour, now.Minute, now.Second, DateTimeKind.Utc)
+            .AddHours(_config.GetValue("Jwt:ExpiryHours", 12));
 
         var descriptor = new SecurityTokenDescriptor
         {

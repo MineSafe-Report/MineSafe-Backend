@@ -29,6 +29,11 @@ public class ReportAttachment
     [MaxLength(64)]
     public string? Sha256Hash { get; set; }
 
+    // The phone's own stable ID for this upload (unique per report). A retried upload with the
+    // same ID returns the original attachment instead of creating a duplicate.
+    [MaxLength(100)]
+    public string? ClientAttachmentId { get; set; }
+
     // SQL column is "UploadedByAccount" (no ID). Mapped explicitly in the DbContext.
     public int UploadedByAccountId { get; set; }
     public Account UploadedBy { get; set; } = null!;
