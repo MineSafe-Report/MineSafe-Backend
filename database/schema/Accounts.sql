@@ -4,10 +4,8 @@ CREATE TABLE Accounts (
     FullName NVARCHAR(100) NOT NULL,
     Email NVARCHAR(255) NOT NULL,
     PasswordHash NVARCHAR(255) NOT NULL,
-    IsActive BIT NOT NULL
-        CONSTRAINT DF_Accounts_IsActive DEFAULT (1),
-    CreatedAt DATETIME2(0) NOT NULL
-        CONSTRAINT DF_Accounts_CreatedAt DEFAULT (SYSUTCDATETIME()),
+    IsActive BIT NOT NULL CONSTRAINT DF_Accounts_IsActive DEFAULT (1),
+    CreatedAt DATETIME2(0) NOT NULL CONSTRAINT DF_Accounts_CreatedAt DEFAULT (SYSUTCDATETIME()),
     UpdatedAt DATETIME2(0) NULL,
     RowVersion ROWVERSION NOT NULL,
 
@@ -16,5 +14,4 @@ CREATE TABLE Accounts (
     CONSTRAINT UQ_Accounts_Email UNIQUE (Email)
 );
 
-CREATE INDEX IX_Accounts_FullName
-    ON Accounts (FullName);
+CREATE INDEX IX_Accounts_FullName ON Accounts (FullName);

@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MineSafety.Api.Entities;
 
-// Matches database/schema/005_Accounts.sql
+// Matches database/schema/Accounts.sql
 // NOTE: there is NO RoleID on Accounts. Roles are linked through the AccountRoles table,
 // and locations through AccountLocations, so one account can have several of each.
 public class Account

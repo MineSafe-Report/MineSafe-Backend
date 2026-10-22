@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MineSafety.Api.Entities;
 
-// Matches database/schema/004_Locations.sql
+// Matches database/schema/Locations.sql
 public class Location
 {
     public int LocationId { get; set; }              // LocationID (PK)

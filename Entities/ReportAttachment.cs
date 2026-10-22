@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MineSafety.Api.Entities;
 
-// Matches database/schema/009_ReportAttachments.sql
+// Matches database/schema/ReportAttachments.sql
 // The FILE lives in a folder on the server; this row only stores where it is,
 // plus a hash to check it arrived intact.
 public class ReportAttachment

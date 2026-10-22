@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MineSafety.Api.Entities;
 
-// Matches database/schema/003_ReportStatuses.sql : Pending Review, Approved, Denied.
+// Matches database/schema/ReportStatuses.sql : Pending Review, Approved, Denied.
 // ("Pending upload" is NOT here on purpose: that only exists on the phone before sync.)
 public class ReportStatus
 {

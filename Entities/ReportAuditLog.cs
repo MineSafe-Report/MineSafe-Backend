@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MineSafety.Api.Entities;
 
-// Matches database/schema/011_ReportAuditLog.sql : history of everything done to a report.
+// Matches database/schema/ReportAuditLog.sql : history of everything done to a report.
 public class ReportAuditLog
 {
     public int AuditLogId { get; set; }              // AuditLogID (PK)

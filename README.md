@@ -256,7 +256,7 @@ C# property, it is mapped explicitly in `Data/MineSafetyDbContext.cs`:
 - Refresh tokens: tokens last one shift (12 h). Offline reports wait safely on the phone; if the
   token has expired the worker logs in again and the queue uploads. Deactivation still takes effect
   immediately (RoleRefresher).
-- Evidence tracking needs `database/migrations/003_AddEvidenceTracking.sql` on existing databases
+- Evidence tracking needs `database/migrations/AddEvidenceTracking.sql` on existing databases
   (fresh databases get it from the schema scripts).
 - Push notifications (Firebase): alerts are in-app via `/api/notifications`.
 

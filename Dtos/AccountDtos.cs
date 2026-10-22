@@ -41,7 +41,7 @@ public class AccountDto
     };
 }
 
-// Sizes match database/schema/005_Accounts.sql
+// Sizes match database/schema/Accounts.sql
 public class CreateAccountRequest
 {
     [Required, MaxLength(50)]

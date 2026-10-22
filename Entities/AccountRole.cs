@@ -1,6 +1,6 @@
 namespace MineSafety.Api.Entities;
 
-// Matches database/schema/006_AccountRoles.sql
+// Matches database/schema/AccountRoles.sql
 // A "link" table: one row = "this account has this role".
 // Rows are switched off (IsActive = false) instead of deleted, so history is kept.
 public class AccountRole

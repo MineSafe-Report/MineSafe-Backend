@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MineSafety.Api.Entities;
 
-// Matches database/schema/008_Reports.sql, the main table in the system.
+// Matches database/schema/Reports.sql, the main table in the system.
 public class Report
 {
     public int ReportId { get; set; }                // ReportID (PK, SQL identity)

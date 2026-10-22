@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MineSafety.Api.Entities;
 
-// Matches database/schema/010_ReportReviews.sql : a supervisor's approve/deny decision.
+// Matches database/schema/ReportReviews.sql : a supervisor's approve/deny decision.
 public class ReportReview
 {
     public int ReviewId { get; set; }                // ReviewID (PK)
