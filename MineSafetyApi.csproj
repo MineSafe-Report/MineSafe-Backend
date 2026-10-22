@@ -11,6 +11,14 @@
     <RootNamespace>MineSafety.Api</RootNamespace>
   </PropertyGroup>
 
+  <!-- The test project lives inside this folder; keep its files out of the API build. -->
+  <ItemGroup>
+    <Compile Remove="tests\**" />
+    <Content Remove="tests\**" />
+    <None Remove="tests\**" />
+    <EmbeddedResource Remove="tests\**" />
+  </ItemGroup>
+
   <ItemGroup>
     <!-- Lets the API read and check JWT tokens sent by the app -->
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.0" />

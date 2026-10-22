@@ -7,6 +7,7 @@ CREATE TABLE ReportAttachments (
     MimeType NVARCHAR(100) NOT NULL,
     SizeBytes BIGINT NOT NULL,
     Sha256Hash CHAR(64) NULL,
+    ClientAttachmentId NVARCHAR(100) NULL,
     UploadedByAccount INT NOT NULL,
     UploadedAt DATETIME2(0) NOT NULL
         CONSTRAINT DF_ReportAttachments_UploadedAt DEFAULT (SYSUTCDATETIME()),
@@ -31,3 +32,8 @@ CREATE INDEX IX_ReportAttachments_UploadedByAccount
 
 CREATE INDEX IX_ReportAttachments_StorageKey
     ON ReportAttachments (StorageKey);
+
+-- A retried upload with the same client ID returns the original attachment.
+CREATE UNIQUE INDEX UX_ReportAttachments_Report_ClientAttachmentId
+    ON ReportAttachments (ReportID, ClientAttachmentId)
+    WHERE ClientAttachmentId IS NOT NULL;

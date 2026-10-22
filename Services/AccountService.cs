@@ -153,12 +153,22 @@ public class AccountService : IAccountService
         if (!string.IsNullOrWhiteSpace(request.NewPassword))
             account.PasswordHash = _hasher.HashPassword(account, request.NewPassword);
 
-        SyncRoles(account, request.RoleIds, adminAccountId, now);
-        SyncLocations(account, request.LocationIds, request.DefaultLocationId, adminAccountId, now);
-
         try
         {
-            await _db.SaveChangesAsync();   // account + role/location changes in one transaction
+            await using var transaction = await _db.Database.BeginTransactionAsync();
+
+            // Michael's database allows only ONE active default location per account, and it checks
+            // that after every single row change. So we first switch off the current default and
+            // save, and only then set the new one. Otherwise there'd be a moment with two defaults.
+            foreach (var link in account.AccountLocations.Where(l => l.IsDefault))
+                link.IsDefault = false;
+            await _db.SaveChangesAsync();
+
+            SyncRoles(account, request.RoleIds, adminAccountId, now);
+            SyncLocations(account, request.LocationIds, request.DefaultLocationId, adminAccountId, now);
+            await _db.SaveChangesAsync();
+
+            await transaction.CommitAsync();   // all of it, or (if anything failed) none of it
         }
         catch (DbUpdateConcurrencyException)
         {
