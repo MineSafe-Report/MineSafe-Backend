@@ -12,8 +12,9 @@ public interface INotificationService
     Task<int> MarkAllReadAsync(int accountId);
 }
 
-// Reading alerts. (Alerts are CREATED by ReportService, inside the same transaction as the
-// report or review they're about.) You only ever see notifications addressed to YOU.
+// Reading notifications and marking them as read. Users only ever see their own notifications.
+// The notifications themselves are created by ReportService, in the same transaction as the
+// report or review they are about.
 public class NotificationService : INotificationService
 {
     private readonly MineSafetyDbContext _db;
@@ -34,7 +35,7 @@ public class NotificationService : INotificationService
 
         var total = await query.CountAsync();
 
-        // Unread first, urgent alerts first, newest first.
+        // Unread first, then urgent alerts, then newest first.
         var items = await query
             .Include(n => n.Report)
             .OrderBy(n => n.ReadAt != null)
@@ -64,13 +65,13 @@ public class NotificationService : INotificationService
 
     public async Task<ServiceResult<NotificationDto>> MarkReadAsync(int notificationId, int accountId)
     {
-        // "RecipientAccountId == accountId" is the security check: someone else's alert = 404.
+        // Checking the recipient means someone else's notification returns 404.
         var n = await _db.Notifications.Include(x => x.Report)
             .FirstOrDefaultAsync(x => x.NotificationId == notificationId && x.RecipientAccountId == accountId);
         if (n == null)
             return ServiceResult<NotificationDto>.NotFound($"Notification {notificationId} was not found.");
 
-        n.ReadAt ??= DateTime.UtcNow;      // only set it the first time
+        n.ReadAt ??= DateTime.UtcNow; // only set the first time it is read
         await _db.SaveChangesAsync();
 
         return ServiceResult<NotificationDto>.Ok(new NotificationDto

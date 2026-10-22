@@ -1,6 +1,6 @@
 namespace MineSafety.Api.Common;
 
-// The StatusName values in the ReportStatuses table, in ONE place.
+// The StatusName values from the ReportStatuses table.
 public static class ReportStatusNames
 {
     public const string PendingReview = "Pending Review";
@@ -8,13 +8,13 @@ public static class ReportStatusNames
     public const string Denied = "Denied";
 }
 
-// The values written to ReportReviews.Decision
+// The values stored in ReportReviews.Decision.
 public static class ReviewDecisions
 {
     public const string Approved = "APPROVED";
     public const string Denied = "DENIED";
 
-    // The apps may send APPROVE / DENY (their doc) or APPROVED / DENIED. Both work.
+    // Accepts both APPROVE / DENY and APPROVED / DENIED from the apps.
     public static string? Normalise(string? decision) => decision?.Trim().ToUpperInvariant() switch
     {
         "APPROVE" or "APPROVED" => Approved,
@@ -23,11 +23,11 @@ public static class ReviewDecisions
     };
 }
 
-// The values written to Notifications.NotificationType
+// The values stored in Notifications.NotificationType.
 public static class NotificationTypes
 {
-    public const string IncidentAlert = "INCIDENT_ALERT";   // urgent: an Incident was reported
-    public const string NewReport = "NEW_REPORT";           // a normal new report in your location
-    public const string ReportReviewed = "REPORT_REVIEWED"; // your report was approved or denied
-    public const string IncidentApproved = "INCIDENT_APPROVED"; // Safety Officers: an Incident was approved
+    public const string IncidentAlert = "INCIDENT_ALERT";       // an incident was reported (urgent)
+    public const string NewReport = "NEW_REPORT";               // a new report at one of your locations
+    public const string ReportReviewed = "REPORT_REVIEWED";     // your report was approved or denied
+    public const string IncidentApproved = "INCIDENT_APPROVED"; // sent to Safety Officers when an incident is approved
 }

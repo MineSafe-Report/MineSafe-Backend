@@ -13,15 +13,15 @@ public interface IAuthService
     Task<ServiceResult<CurrentUserDto>> GetCurrentUserAsync(int accountId);
 }
 
-// Checks login details and hands out tokens.
+// Checks login details and issues tokens.
 public class AuthService : IAuthService
 {
     private readonly MineSafetyDbContext _db;
     private readonly ITokenService _tokens;
     private readonly PasswordHasher<Account> _hasher = new();
 
-    // The DbContext and TokenService are "injected": Program.cs registered them,
-    // and ASP.NET hands them to us here automatically.
+    // The DbContext and TokenService are provided through dependency injection
+    // (they are registered in Program.cs).
     public AuthService(MineSafetyDbContext db, ITokenService tokens)
     {
         _db = db;
@@ -32,18 +32,18 @@ public class AuthService : IAuthService
     {
         var login = request.Login.Trim();
 
-        // Find the account by worker ID OR email, and load its role and location links.
+        // Find the account by worker ID or email, along with its roles and locations.
         var account = await LoadAccount()
             .FirstOrDefaultAsync(a => a.WorkerId == login || a.Email == login.ToLower());
 
-        // Same vague message for every failure, so nobody can use the login screen
+        // Every failure gets the same message, so the login screen can't be used
         // to find out which worker IDs exist.
         const string failMessage = "Invalid login details.";
 
         if (account == null || !account.IsActive)
             return ServiceResult<LoginResponse>.BadRequest(failMessage);
 
-        // Hash what they typed and compare it with the stored hash.
+        // Hash the password that was entered and compare it with the stored hash.
         var check = _hasher.VerifyHashedPassword(account, account.PasswordHash, request.Password);
         if (check == PasswordVerificationResult.Failed)
             return ServiceResult<LoginResponse>.BadRequest(failMessage);
@@ -72,12 +72,12 @@ public class AuthService : IAuthService
             : ServiceResult<CurrentUserDto>.Ok(ToCurrentUser(account));
     }
 
-    // Accounts together with their role links (+ role names) and location links (+ locations).
+    // Accounts with their roles and locations loaded.
     private IQueryable<Account> LoadAccount() => _db.Accounts
         .Include(a => a.AccountRoles).ThenInclude(ar => ar.Role)
         .Include(a => a.AccountLocations).ThenInclude(al => al.Location);
 
-    // Only ACTIVE role and location links count. Inactive ones are history, not access.
+    // Only active role and location links count. Inactive ones are kept as history and give no access.
     private static CurrentUserDto ToCurrentUser(Account a) => new()
     {
         AccountId = a.AccountId,

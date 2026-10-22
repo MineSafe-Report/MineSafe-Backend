@@ -3,7 +3,7 @@ using MineSafety.Api.Entities;
 
 namespace MineSafety.Api.Dtos;
 
-// What the API sends back for a location
+// A location as returned by the API.
 public class LocationDto
 {
     public int LocationId { get; set; }
@@ -12,7 +12,7 @@ public class LocationDto
     public string? LocationInfo { get; set; }
     public bool IsActive { get; set; }
 
-    // Copies an entity (database row) into a DTO (JSON shape).
+    // Copies a database row into the JSON shape.
     public static LocationDto FromEntity(Location l) => new()
     {
         LocationId = l.LocationId,
@@ -23,8 +23,8 @@ public class LocationDto
     };
 }
 
-// What the app sends to CREATE a location. The [attributes] are validation rules that match
-// the SQL column sizes: break them and ASP.NET returns 400 before our code even runs.
+// Body for POST /api/locations. The validation attributes match the SQL column sizes,
+// and ASP.NET returns 400 automatically if any of them fail.
 public class CreateLocationRequest
 {
     [Required, MaxLength(100)]
@@ -37,7 +37,7 @@ public class CreateLocationRequest
     public string? LocationInfo { get; set; }
 }
 
-// What the app sends to UPDATE a location. Setting IsActive = true reactivates a deleted one.
+// Body for PUT /api/locations/5. Setting IsActive back to true reactivates a deleted location.
 public class UpdateLocationRequest
 {
     [Required, MaxLength(100)]

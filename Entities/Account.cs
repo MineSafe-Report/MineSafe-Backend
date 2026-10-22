@@ -2,35 +2,35 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MineSafety.Api.Entities;
 
-// Matches database/schema/005_Accounts.sql
-// NOTE: there is NO RoleID on Accounts. Roles are linked through the AccountRoles table,
-// and locations through AccountLocations, so one account can have several of each.
+// Maps to the Accounts table (database/schema/005_Accounts.sql).
+// Accounts has no RoleID column. Roles are linked through AccountRoles and locations through
+// AccountLocations, so one account can have several of each.
 public class Account
 {
-    public int AccountId { get; set; }               // AccountID (PK)
+    public int AccountId { get; set; }             // AccountID (primary key)
 
     [MaxLength(50)]
-    public string WorkerId { get; set; } = "";       // WorkerID, unique, used to log in
+    public string WorkerId { get; set; } = "";     // WorkerID, unique, used to log in
 
     [MaxLength(100)]
     public string FullName { get; set; } = "";
 
     [MaxLength(255)]
-    public string Email { get; set; } = "";          // required + unique in SQL
+    public string Email { get; set; } = "";        // required and unique in SQL
 
     [MaxLength(255)]
-    public string PasswordHash { get; set; } = "";   // never the real password, only its hash
+    public string PasswordHash { get; set; } = ""; // only the hash is stored, never the password
 
-    public bool IsActive { get; set; } = true;       // soft delete flag
+    public bool IsActive { get; set; } = true;     // false = soft deleted
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
 
-    // ROWVERSION: SQL Server changes this on every update. If two people edit the same
-    // account at once, the second save is rejected instead of silently overwriting.
+    // SQL Server changes this value on every update. If two people edit the same account at
+    // the same time, the second save is rejected instead of silently overwriting the first.
     [Timestamp]
     public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
-    // Navigation properties: let us go from an account to its role and location links in C#.
+    // Navigation properties to the account's role and location links.
     public List<AccountRole> AccountRoles { get; set; } = new();
     public List<AccountLocation> AccountLocations { get; set; } = new();
 }

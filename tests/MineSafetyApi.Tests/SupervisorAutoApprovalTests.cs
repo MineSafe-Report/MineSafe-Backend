@@ -7,20 +7,20 @@ using Xunit;
 namespace MineSafety.Api.Tests;
 
 // Supervisors can't review their own reports, so their reports are approved automatically
-// once all expected evidence has arrived. These tests pin that behaviour down.
+// once all of the expected evidence has arrived. These tests cover that behaviour.
 public class SupervisorAutoApprovalTests
 {
-    private static CreateReportRequest Report(string typeCode, int locationId, int images = 0, int voiceNotes = 0,
-                                              Guid? clientId = null) => new()
-    {
-        ClientReportId = clientId ?? Guid.NewGuid(),
-        TypeCode = typeCode,
-        LocationId = locationId,
-        Description = "Loose rock above the walkway.",
-        OccurredAt = DateTime.UtcNow.AddMinutes(-30),
-        ExpectedImageCount = images,
-        ExpectedVoiceNoteCount = voiceNotes
-    };
+    private static CreateReportRequest Report(
+        string typeCode, int locationId, int images = 0, int voiceNotes = 0, Guid? clientId = null) => new()
+        {
+            ClientReportId = clientId ?? Guid.NewGuid(),
+            TypeCode = typeCode,
+            LocationId = locationId,
+            Description = "Loose rock above the walkway.",
+            OccurredAt = DateTime.UtcNow.AddMinutes(-30),
+            ExpectedImageCount = images,
+            ExpectedVoiceNoteCount = voiceNotes
+        };
 
     private static UploadAttachmentRequest Photo(string clientId, byte seed) => new()
     {
@@ -39,7 +39,7 @@ public class SupervisorAutoApprovalTests
     private static int Count(TestWorld w, int reportId, string action) =>
         w.Db.ReportAuditLog.Count(a => a.ReportId == reportId && a.Action == action);
 
-    // How many notifications of this type went to the Safety Officer (O3001) for this report.
+    // How many notifications of this type the Safety Officer (O3001) received for this report.
     private static int OfficerNotifications(TestWorld w, int reportId, string type)
     {
         var officerId = w.User("O3001").AccountId;
@@ -60,12 +60,12 @@ public class SupervisorAutoApprovalTests
         Assert.Equal("APPROVED", report.StatusCode);
         Assert.True(report.AutoApproved);
         Assert.True(report.EvidenceComplete);
-        Assert.Empty(report.Reviews);                                   // nobody "reviewed" it
+        Assert.Empty(report.Reviews); // no supervisor reviewed it
         Assert.Equal(0, w.Db.ReportReviews.Count(r => r.ReportId == report.ReportId));
         Assert.Equal(1, Count(w, report.ReportId, ReportService.AutoApprovedAction));
         Assert.Equal(0, Count(w, report.ReportId, ReviewDecisions.Approved));
-        Assert.Equal(1, OfficerNotifications(w, report.ReportId, NotificationTypes.IncidentAlert));    // still sent on submission
-        Assert.Equal(1, OfficerNotifications(w, report.ReportId, NotificationTypes.IncidentApproved)); // the Safety Officer
+        Assert.Equal(1, OfficerNotifications(w, report.ReportId, NotificationTypes.IncidentAlert));    // sent when submitted
+        Assert.Equal(1, OfficerNotifications(w, report.ReportId, NotificationTypes.IncidentApproved)); // sent when approved
     }
 
     [Fact]
@@ -85,9 +85,9 @@ public class SupervisorAutoApprovalTests
         Assert.Equal("APPROVED", upload.Value!.ReportStatusCode);
         Assert.True(upload.Value.EvidenceComplete);
         var mine = await w.Reports.ListAsync(supervisor, new ReportListFilter { MineOnly = true });
-        Assert.Equal("APPROVED", mine.Items.Single().StatusCode);       // what My Reports shows
+        Assert.Equal("APPROVED", mine.Items.Single().StatusCode); // what My Reports shows
         Assert.Equal(1, Count(w, reportId, ReportService.AutoApprovedAction));
-        Assert.Equal(0, OfficerNotifications(w, reportId, NotificationTypes.IncidentApproved)); // not an Incident
+        Assert.Equal(0, OfficerNotifications(w, reportId, NotificationTypes.IncidentApproved)); // a hazard, not an incident
     }
 
     [Fact]
@@ -101,9 +101,9 @@ public class SupervisorAutoApprovalTests
         var reportId = created.Value!.Report.ReportId;
 
         var first = await w.Attachments.UploadAsync(reportId, Photo("image-1", 1), supervisor);
-        Assert.Equal("PENDING_REVIEW", first.Value!.ReportStatusCode);   // 1 of 2
+        Assert.Equal("PENDING_REVIEW", first.Value!.ReportStatusCode); // 1 of 2 photos
 
-        // A failed upload (wrong file type) is rejected and counts for nothing.
+        // An upload with the wrong file type is rejected and doesn't count.
         var failed = await w.Attachments.UploadAsync(reportId, new UploadAttachmentRequest
         {
             File = TestWorld.File("application/pdf", new byte[] { 1, 2, 3 }),
@@ -122,14 +122,14 @@ public class SupervisorAutoApprovalTests
         Assert.False(approve.Success);
         Assert.Equal("EVIDENCE_INCOMPLETE", approve.Code);
 
-        // ...and the reporter still can't review their own report at all.
+        // ...and the reporter can't review their own report at all.
         var own = await w.Reports.ReviewAsync(reportId, new CreateReviewRequest { Decision = "APPROVE" }, supervisor);
         Assert.Equal("OWN_REPORT", own.Code);
 
         Assert.Equal(0, Count(w, reportId, ReportService.AutoApprovedAction));
         Assert.Equal(0, OfficerNotifications(w, reportId, NotificationTypes.IncidentApproved));
 
-        // The second photo arrives (retry of the failed one, now as a real image): approved.
+        // The second photo arrives (the failed one, retried as a real image), so the report is approved.
         var second = await w.Attachments.UploadAsync(reportId, Photo("image-2", 2), supervisor);
         Assert.Equal("APPROVED", second.Value!.ReportStatusCode);
     }
@@ -143,7 +143,7 @@ public class SupervisorAutoApprovalTests
         var request = Report("INCIDENT", w.LocationId("T-7"), images: 1, clientId: clientReportId);
 
         var first = await w.Reports.SubmitAsync(request, supervisor);
-        var retry = await w.Reports.SubmitAsync(request, supervisor);             // phone retried
+        var retry = await w.Reports.SubmitAsync(request, supervisor); // the phone retries
         Assert.False(first.Value!.AlreadyExisted);
         Assert.True(retry.Value!.AlreadyExisted);
         var reportId = first.Value.Report.ReportId;
@@ -151,13 +151,13 @@ public class SupervisorAutoApprovalTests
         Assert.Equal(1, w.Db.Reports.Count(r => r.ClientReportId == clientReportId));
 
         var upload1 = await w.Attachments.UploadAsync(reportId, Photo("image-7", 7), supervisor);
-        var upload2 = await w.Attachments.UploadAsync(reportId, Photo("image-7", 7), supervisor); // same upload again
+        var upload2 = await w.Attachments.UploadAsync(reportId, Photo("image-7", 7), supervisor); // the same upload again
         Assert.False(upload1.Value!.AlreadyExisted);
         Assert.True(upload2.Value!.AlreadyExisted);
         Assert.Equal(upload1.Value.Attachment.AttachmentId, upload2.Value.Attachment.AttachmentId);
         Assert.Equal(1, w.Db.ReportAttachments.Count(a => a.ReportId == reportId));
 
-        // Extra checks after approval must be harmless too.
+        // Running the checks again after approval must not change anything.
         await w.Reports.TryAutoApproveAsync(reportId, supervisor);
         var retryAfter = await w.Reports.SubmitAsync(request, supervisor);
         Assert.Equal("APPROVED", retryAfter.Value!.Report.StatusCode);
@@ -176,16 +176,16 @@ public class SupervisorAutoApprovalTests
 
         var created = await w.Reports.SubmitAsync(Report("NEAR_MISS", w.LocationId("T-7")), worker);
         var reportId = created.Value!.Report.ReportId;
-        Assert.Equal("PENDING_REVIEW", created.Value.Report.StatusCode);   // no auto-approval
+        Assert.Equal("PENDING_REVIEW", created.Value.Report.StatusCode); // not approved automatically
         Assert.True(created.Value.Report.EvidenceComplete);
 
-        await w.Reports.TryAutoApproveAsync(reportId, worker);               // must do nothing
+        await w.Reports.TryAutoApproveAsync(reportId, worker); // should do nothing for a worker
         Assert.Equal(0, Count(w, reportId, ReportService.AutoApprovedAction));
 
         var reviewed = await w.Reports.ReviewAsync(reportId, new CreateReviewRequest { Decision = "APPROVE" }, supervisor);
         Assert.True(reviewed.Success);
         Assert.Equal("APPROVED", reviewed.Value!.StatusCode);
-        Assert.False(reviewed.Value.AutoApproved);                           // a real review
+        Assert.False(reviewed.Value.AutoApproved); // approved through a real review
         Assert.Single(reviewed.Value.Reviews);
     }
 
@@ -196,7 +196,7 @@ public class SupervisorAutoApprovalTests
         var supervisor = w.User("S2001");
         var admin = w.User("A9001");
 
-        // Simulate a report created before evidence tracking: no expected counts stored.
+        // Simulate a report created before evidence tracking, with no expected counts stored.
         var created = await w.Reports.SubmitAsync(Report("HAZARD", w.LocationId("T-7"), images: 1), supervisor);
         var reportId = created.Value!.Report.ReportId;
         var row = await w.Db.Reports.SingleAsync(r => r.ReportId == reportId);

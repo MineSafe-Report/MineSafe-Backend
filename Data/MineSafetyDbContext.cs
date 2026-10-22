@@ -4,11 +4,11 @@ using MineSafety.Api.Entities;
 
 namespace MineSafety.Api.Data;
 
-// The DbContext is EF Core's "connection" to the database. Each DbSet is one table.
-// Writing  _db.Locations.Add(x)  then  SaveChangesAsync()  makes EF write the INSERT for us.
+// Entity Framework's link to the database. Each DbSet is one table, so calling
+// _db.Locations.Add(x) followed by SaveChangesAsync() makes EF write the INSERT.
 //
-// IMPORTANT: Michael's SQL scripts (database/schema) CREATE the tables. This class only
-// DESCRIBES them so EF knows how to read and write. The API never creates or changes tables.
+// The tables are created by the SQL scripts in database/schema. This class only describes
+// them so EF knows how to read and write them. The API never creates or changes tables.
 public class MineSafetyDbContext : DbContext
 {
     public MineSafetyDbContext(DbContextOptions<MineSafetyDbContext> options) : base(options) { }
@@ -26,8 +26,8 @@ public class MineSafetyDbContext : DbContext
     public DbSet<ReportAuditLog> ReportAuditLog => Set<ReportAuditLog>();
     public DbSet<Notification> Notifications => Set<Notification>();
 
-    // Here we spell out every table name, primary key and any column whose name differs
-    // from the C# property, so EF matches the SQL scripts exactly instead of guessing.
+    // Every table name, primary key and relationship is spelled out here, along with any column
+    // whose name differs from the C# property, so EF matches the SQL scripts exactly.
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Role>(e =>
@@ -55,7 +55,7 @@ public class MineSafetyDbContext : DbContext
         {
             e.ToTable("AccountLocations");
             e.HasKey(x => x.AccountLocationId);
-            e.Property(x => x.AccountLocationId).HasColumnName("AccountLocation");   // SQL name has no "ID"
+            e.Property(x => x.AccountLocationId).HasColumnName("AccountLocation"); // the SQL column has no "ID" suffix
             e.HasOne(x => x.Account).WithMany(a => a.AccountLocations).HasForeignKey(x => x.AccountId);
             e.HasOne(x => x.Location).WithMany().HasForeignKey(x => x.LocationId);
         });
@@ -92,7 +92,7 @@ public class MineSafetyDbContext : DbContext
         {
             e.ToTable("ReportAttachments");
             e.HasKey(x => x.AttachmentId);
-            e.Property(x => x.UploadedByAccountId).HasColumnName("UploadedByAccount"); // SQL name has no "ID"
+            e.Property(x => x.UploadedByAccountId).HasColumnName("UploadedByAccount"); // the SQL column has no "ID" suffix
             e.HasOne(x => x.Report).WithMany(r => r.Attachments).HasForeignKey(x => x.ReportId);
             e.HasOne(x => x.UploadedBy).WithMany().HasForeignKey(x => x.UploadedByAccountId);
         });
@@ -123,17 +123,17 @@ public class MineSafetyDbContext : DbContext
             e.HasOne(x => x.Report).WithMany().HasForeignKey(x => x.ReportId);
         });
 
-        // We never hard-delete anything (everything is soft delete), so switch off EF's
-        // cascade deletes everywhere. This matches the SQL scripts, which have no cascades.
+        // Nothing is ever hard deleted (we use soft deletes), so cascade deletes are turned off
+        // everywhere. This matches the SQL scripts, which don't use cascades either.
         foreach (var fk in modelBuilder.Model.GetEntityTypes().SelectMany(t => t.GetForeignKeys()))
         {
             fk.DeleteBehavior = DeleteBehavior.Restrict;
         }
 
-        // Every date in the database is stored in UTC, but SQL's DATETIME2 doesn't remember that.
-        // Without this, dates come back "unlabelled" and the JSON has no "Z" on the end, so the
-        // phone can't tell UTC from local time. These converters label every date read from the
-        // database as UTC, so the JSON always looks like "2026-10-18T09:30:00Z".
+        // All dates are stored in UTC, but SQL Server's DATETIME2 doesn't record the time zone.
+        // Without these converters the dates come back without a zone and the JSON has no "Z",
+        // so the phone can't tell UTC from local time. With them, every date is returned as UTC,
+        // for example "2026-10-18T09:30:00Z".
         var utc = new ValueConverter<DateTime, DateTime>(
             v => v,
             v => DateTime.SpecifyKind(v, DateTimeKind.Utc));

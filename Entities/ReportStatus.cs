@@ -2,15 +2,15 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MineSafety.Api.Entities;
 
-// Matches database/schema/003_ReportStatuses.sql : Pending Review, Approved, Denied.
-// ("Pending upload" is NOT here on purpose: that only exists on the phone before sync.)
+// Maps to the ReportStatuses table (database/schema/003_ReportStatuses.sql): Pending Review, Approved and Denied.
+// "Pending upload" is not a status here because it only exists on the phone before the report syncs.
 public class ReportStatus
 {
-    public int StatusId { get; set; }                // StatusID (PK)
+    public int StatusId { get; set; }              // StatusID (primary key)
 
     [MaxLength(50)]
     public string StatusName { get; set; } = "";
 
-    public bool IsTerminal { get; set; }             // true = final, nothing happens after it
-    public int DisplayOrder { get; set; }            // unique, >= 0
+    public bool IsTerminal { get; set; }           // true means final, the status won't change again
+    public int DisplayOrder { get; set; }          // unique, 0 or higher
 }

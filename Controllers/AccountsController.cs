@@ -6,7 +6,7 @@ using MineSafety.Api.Services;
 
 namespace MineSafety.Api.Controllers;
 
-// Handles /api/accounts. The whole controller is admin-only.
+// Endpoints under /api/accounts. Only administrators can use them.
 [Route("api/accounts")]
 [Authorize(Roles = RoleNames.Administrator)]
 public class AccountsController : ApiControllerBase
@@ -19,7 +19,7 @@ public class AccountsController : ApiControllerBase
     }
 
     // GET /api/accounts?search=bob&roleId=1&includeInactive=true
-    // roleId filter = accounts that currently have that role (active AccountRoles row)
+    // roleId only returns accounts that currently have that role.
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] string? search = null, [FromQuery] int? roleId = null,
                                             [FromQuery] bool includeInactive = true)
@@ -36,7 +36,7 @@ public class AccountsController : ApiControllerBase
     }
 
     // POST /api/accounts
-    // body: { workerId, fullName, email, password, roleIds: [1], locationIds: [2,3], defaultLocationId: 2 }
+    // Body: { workerId, fullName, email, password, roleIds: [1], locationIds: [2, 3], defaultLocationId: 2 }
     [HttpPost]
     public async Task<IActionResult> Create(CreateAccountRequest request)
     {
@@ -48,8 +48,8 @@ public class AccountsController : ApiControllerBase
     }
 
     // PUT /api/accounts/5
-    // Send the FULL new state: roles/locations missing from the lists are switched off.
-    // Also used for admin password reset via "newPassword".
+    // The body is the complete new state, so any role or location left out of the lists is removed.
+    // An administrator can also reset the password here by filling in newPassword.
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, UpdateAccountRequest request)
     {
@@ -57,7 +57,8 @@ public class AccountsController : ApiControllerBase
         return result.Success ? Ok(result.Value) : ErrorResponse(result);
     }
 
-    // DELETE /api/accounts/5   (soft delete: account is deactivated and can no longer log in)
+    // DELETE /api/accounts/5
+    // Soft delete: the account is deactivated and can no longer log in.
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id)
     {
@@ -66,7 +67,8 @@ public class AccountsController : ApiControllerBase
     }
 }
 
-// GET /api/roles  - fills the role dropdown on the create/edit account screen.
+// GET /api/roles
+// Fills the role dropdown on the create and edit account screens.
 [Route("api/roles")]
 [Authorize(Roles = RoleNames.Administrator)]
 public class RolesController : ApiControllerBase

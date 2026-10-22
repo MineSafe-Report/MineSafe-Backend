@@ -5,14 +5,13 @@ using MineSafety.Api.Entities;
 
 namespace MineSafety.Api.Data;
 
-// DEVELOPMENT ONLY. Fills an EMPTY database (already created by Michael's SQL scripts)
-// with test data so we can log in and test straight away.
+// Development only. Fills an empty database with test data so we can log in and test straight away.
 //
-// It never creates tables and never overwrites anything: each table is only filled if it
-// has no rows yet. So if Michael's seed scripts have already filled Roles, we skip Roles.
+// The tables must already exist (created by the scripts in database/schema). The seeder never
+// creates tables and never overwrites anything: each table is only filled if it has no rows yet.
 //
-// Why test accounts are seeded here and not in SQL: passwords must be hashed by the same
-// PasswordHasher the login code uses. A hash typed into a SQL file wouldn't match.
+// Test accounts are created here instead of in SQL because the passwords have to be hashed with
+// the same PasswordHasher the login code uses. A hash pasted into a SQL script wouldn't match.
 public static class DbSeeder
 {
     public const string TestPassword = "Password123!";
@@ -74,7 +73,7 @@ public static class DbSeeder
                     a.AccountLocations.Add(new AccountLocation
                     {
                         LocationId = loc[locationCodes[i]],
-                        IsDefault = i == 0,                 // first one listed is the default
+                        IsDefault = i == 0, // the first location listed is the default
                         AssignedAt = now,
                         IsActive = true
                     });
@@ -84,7 +83,7 @@ public static class DbSeeder
             db.Accounts.AddRange(
                 Make("W1001", "Test Worker", "worker@mine.test", RoleNames.Worker, "T-7", "ST-12B"),
                 Make("S2001", "Test Supervisor", "supervisor@mine.test", RoleNames.Supervisor, "T-7", "ST-12B"),
-                // A second supervisor at DIFFERENT locations, to prove location scoping works.
+                // A second supervisor at different locations, used to test location scoping.
                 Make("S2002", "Other Supervisor", "supervisor2@mine.test", RoleNames.Supervisor, "S1-ST", "WS-1"),
                 Make("O3001", "Test Safety Officer", "officer@mine.test", RoleNames.SafetyOfficer),
                 Make("A9001", "Test Admin", "admin@mine.test", RoleNames.Administrator));

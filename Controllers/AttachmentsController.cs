@@ -6,7 +6,7 @@ using MineSafety.Api.Services;
 
 namespace MineSafety.Api.Controllers;
 
-// Photos and voice notes: upload after the report is synced, download to view.
+// Photos and voice notes. They are uploaded after the report itself has synced.
 [Authorize]
 public class AttachmentsController : ApiControllerBase
 {
@@ -19,11 +19,12 @@ public class AttachmentsController : ApiControllerBase
         _access = access;
     }
 
-    // POST /api/reports/5/attachments    (multipart/form-data: file, attachmentType, clientAttachmentId, capturedAt)
-    // 201 = saved. 200 = this exact file was already uploaded (a retry). 413 = over 25 MB.
+    // POST /api/reports/5/attachments
+    // multipart/form-data with: file, attachmentType, clientAttachmentId, capturedAt
+    // 201 = saved, 200 = the same file was already uploaded (a retry), 413 = larger than 25 MB.
     [HttpPost("api/reports/{reportId:int}/attachments")]
     [Consumes("multipart/form-data")]
-    [RequestSizeLimit(AttachmentService.MaxBytes + 1024 * 1024)]   // 25 MB + room for the form fields
+    [RequestSizeLimit(AttachmentService.MaxBytes + 1024 * 1024)] // 25 MB plus room for the form fields
     public async Task<IActionResult> Upload(int reportId, [FromForm] UploadAttachmentRequest request)
     {
         var user = await _access.GetCurrentUserAsync(User);
@@ -36,7 +37,8 @@ public class AttachmentsController : ApiControllerBase
             : StatusCode(StatusCodes.Status201Created, result.Value);
     }
 
-    // GET /api/attachments/12    -> the actual photo / audio file
+    // GET /api/attachments/12
+    // Returns the actual photo or audio file.
     [HttpGet("api/attachments/{id:int}")]
     public async Task<IActionResult> Download(int id)
     {

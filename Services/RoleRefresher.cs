@@ -5,14 +5,14 @@ using MineSafety.Api.Data;
 
 namespace MineSafety.Api.Services;
 
-// Runs on EVERY request, right after the token's signature and expiry have been checked.
+// Runs on every request, right after the token's signature and expiry have been checked.
 //
-// Problem it solves: a token lasts 12 hours. If an admin deactivates an account or removes
-// a role at 10:00, a token issued at 08:00 would still say "Supervisor" until 20:00.
-// So instead of trusting the roles written inside the token, we look them up fresh:
-//   - account deactivated, or no active roles left  ->  request rejected with 401
-//   - otherwise the user's roles are replaced with their CURRENT roles from AccountRoles
-// Cost: one small database query per request, which is fine for this system.
+// A token is valid for 12 hours. If an administrator deactivates an account or removes a role
+// at 10:00, a token issued at 08:00 would otherwise keep that role until 20:00. So instead of
+// trusting the roles stored in the token, they are loaded again from the database:
+//   - if the account is deactivated or has no active roles, the request is rejected with 401
+//   - otherwise the token's roles are replaced with the current roles from AccountRoles
+// This costs one small query per request, which is fine for a system of this size.
 public static class RoleRefresher
 {
     public static async Task OnTokenValidated(TokenValidatedContext context)
@@ -38,7 +38,7 @@ public static class RoleRefresher
             return;
         }
 
-        // Swap the token's role claims for the current ones.
+        // Replace the token's role claims with the current roles.
         var identity = (ClaimsIdentity)context.Principal!.Identity!;
         foreach (var oldRole in identity.FindAll("role").ToList())
             identity.RemoveClaim(oldRole);

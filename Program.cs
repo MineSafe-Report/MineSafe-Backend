@@ -1,6 +1,6 @@
-// Program.cs is the START of the app. It does two jobs:
-//   1. Register services ("here are the tools the app can use")
-//   2. Build the pipeline ("here is the order every request passes through")
+// The application's entry point. It does two things:
+//   1. Registers the services the app uses.
+//   2. Sets up the pipeline, which is the order every request passes through.
 
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -13,14 +13,14 @@ using MineSafety.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ---------- 1. REGISTER SERVICES ----------
+// ---------- 1. Services ----------
 
-// Database: SQL Server, using the connection string from appsettings.
-// The tables must ALREADY exist (created by Michael's scripts, see scripts/create-local-db.ps1).
+// SQL Server, using the connection string from appsettings.json.
+// The tables must already exist (see scripts/create-local-db.ps1).
 builder.Services.AddDbContext<MineSafetyDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("MineSafetyDb")));
 
-// Our own services. "Scoped" = one fresh instance per request.
+// Our own services. Scoped means a new instance is created for every request.
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IAccessService, AccessService>();
@@ -31,35 +31,35 @@ builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<ILookupService, LookupService>();
 builder.Services.AddScoped<IAttachmentService, AttachmentService>();
 
-// The JWT signing key is a secret, so it is NOT in appsettings.json (which is committed).
-// In development it comes from appsettings.Development.json; anywhere else, from an
-// environment variable called Jwt__Key. No key = the app refuses to start.
+// The JWT signing key is a secret, so it isn't in appsettings.json (which is committed).
+// In development it comes from appsettings.Development.json, and anywhere else from an
+// environment variable called Jwt__Key. Without a key the app refuses to start.
 var jwt = builder.Configuration.GetSection("Jwt");
 var jwtKey = jwt["Key"];
 if (string.IsNullOrWhiteSpace(jwtKey) || jwtKey.Length < 32)
     throw new InvalidOperationException("Jwt:Key is missing or shorter than 32 characters.");
 
-// Authentication: "every request may carry a JWT token; here's how to check it's genuine"
+// Authentication: requests carry a JWT token, and this is how we check that it's genuine.
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
-        options.MapInboundClaims = false;   // keep claim names short ("sub", "role") as we wrote them
+        options.MapInboundClaims = false; // keep the short claim names ("sub", "role") we put in the token
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
             ValidIssuer = jwt["Issuer"],
             ValidateAudience = true,
             ValidAudience = jwt["Audience"],
-            ValidateIssuerSigningKey = true,   // reject tokens not signed with OUR key
+            ValidateIssuerSigningKey = true, // reject tokens that weren't signed with our key
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-            ValidateLifetime = true,           // reject expired tokens
+            ValidateLifetime = true,         // reject expired tokens
             ClockSkew = TimeSpan.FromMinutes(1),
             NameClaimType = "name",
-            RoleClaimType = "role"             // [Authorize(Roles = ...)] reads the "role" claims
+            RoleClaimType = "role"           // [Authorize(Roles = ...)] checks the "role" claims
         };
-        // After the token checks out, re-load the account's CURRENT roles from the database,
-        // so deactivations and role changes take effect immediately (see RoleRefresher.cs).
+        // Once the token is valid, reload the account's current roles from the database so that
+        // deactivated accounts and removed roles stop working straight away (see RoleRefresher.cs).
         options.Events = new JwtBearerEvents
         {
             OnTokenValidated = RoleRefresher.OnTokenValidated
@@ -67,8 +67,8 @@ builder.Services
     });
 builder.Services.AddAuthorization();
 
-// Controllers. The extra part makes validation errors (missing/too-long fields) use the same
-// error shape as everything else: { "code": "VALIDATION_FAILED", "message": "...", "errors": { field: [..] } }
+// Controllers. Validation errors use the same shape as every other error:
+// { "code": "VALIDATION_FAILED", "message": "...", "errors": { "field": ["..."] } }
 builder.Services.AddControllers().ConfigureApiBehaviorOptions(options =>
 {
     options.InvalidModelStateResponseFactory = context => new BadRequestObjectResult(new
@@ -81,7 +81,7 @@ builder.Services.AddControllers().ConfigureApiBehaviorOptions(options =>
     });
 });
 
-// Swagger: the test page. The extra setup adds an "Authorize" button where you paste a token.
+// Swagger, the API test page. The security settings add an Authorize button for pasting a token.
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
@@ -107,16 +107,16 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-// CORS: lets a web page on a different address (the web admin app) call this API.
+// CORS lets the web admin app, which runs on a different address, call this API.
 builder.Services.AddCors(o => o.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
 var app = builder.Build();
 
-// ---------- 2. THE PIPELINE (order matters) ----------
+// ---------- 2. Pipeline (the order matters) ----------
 
 if (app.Environment.IsDevelopment())
 {
-    // Development only: put test data into the (script-created) database if it's empty.
+    // Development only: add test data if the database is empty.
     // The API never creates or changes tables itself.
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<MineSafetyDbContext>();
@@ -131,7 +131,7 @@ if (app.Environment.IsDevelopment())
             "Run scripts/create-local-db.ps1 first.");
     }
 
-    // The API expects the columns added by database/migrations/003_AddEvidenceTracking.sql.
+    // Check that the columns added by database/migrations/003_AddEvidenceTracking.sql exist.
     try
     {
         _ = db.Reports.Select(r => r.ExpectedImageCount).FirstOrDefault();
@@ -149,11 +149,11 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseCors();
-app.UseAuthentication();   // 1st: WHO are you? (reads the token, then RoleRefresher)
-app.UseAuthorization();    // 2nd: are you ALLOWED? (checks [Authorize] and roles)
-app.MapControllers();      // 3rd: hand the request to the matching controller method
+app.UseAuthentication(); // 1. who is making the request (reads the token, then RoleRefresher runs)
+app.UseAuthorization();  // 2. are they allowed to do this ([Authorize] and roles)
+app.MapControllers();    // 3. send the request to the matching controller method
 
-// GET /health : no login needed. The app calls this to check "can I reach the server right now?"
+// GET /health needs no login. The app calls it to check whether it can reach the server.
 app.MapGet("/health", () => Results.Ok(new { status = "ok", time = DateTime.UtcNow }));
 
 app.Run();

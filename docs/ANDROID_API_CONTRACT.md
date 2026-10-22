@@ -237,6 +237,9 @@ Optional filter: `&status=PENDING_REVIEW`.
   or approved; denied ones are excluded).
 - `GET /api/safety-officer/incidents/{reportId}` -> `{ "report": { ..., "dashboardUrl": "http://..." } }`
 - Routes already match the app.
+- Web dashboard (not the Android app): a Safety Officer can also use `GET /api/reports` and
+  `GET /api/reports/{reportId}`, which return **every** active report (all types, including denied
+  ones), read-only. The mobile incident routes above are unchanged.
 
 ### 3.11 Download evidence
 `GET /api/attachments/{attachmentId}` with the bearer token -> the file bytes with the right

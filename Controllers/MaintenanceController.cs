@@ -6,7 +6,7 @@ using MineSafety.Api.Services;
 
 namespace MineSafety.Api.Controllers;
 
-// Administrator-only, one-time clean-up tasks.
+// One-off clean-up tasks. Administrators only.
 [Route("api/admin/maintenance")]
 [Authorize(Roles = RoleNames.Administrator)]
 public class MaintenanceController : ApiControllerBase
@@ -19,9 +19,9 @@ public class MaintenanceController : ApiControllerBase
     }
 
     // POST /api/admin/maintenance/stuck-supervisor-reports
-    // body: { "dryRun": true }                                    -> list only, changes nothing
-    //       { "dryRun": false }                                   -> approve the ones that are complete
-    //       { "dryRun": false, "confirmLegacyReportIds": [4, 7] } -> also approve these checked older reports
+    // { "dryRun": true }                                     lists what would happen, changes nothing
+    // { "dryRun": false }                                    approves the reports whose evidence is complete
+    // { "dryRun": false, "confirmLegacyReportIds": [4, 7] }  also approves these manually checked older reports
     [HttpPost("stuck-supervisor-reports")]
     public async Task<IActionResult> StuckSupervisorReports(StuckReportsRequest request)
     {

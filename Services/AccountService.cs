@@ -17,7 +17,8 @@ public interface IAccountService
     Task<List<RoleDto>> GetRolesAsync();
 }
 
-// Accounts plus their role links (AccountRoles) and location links (AccountLocations).
+// Creating, reading, updating and deactivating accounts, together with their
+// role links (AccountRoles) and location links (AccountLocations).
 public class AccountService : IAccountService
 {
     private readonly MineSafetyDbContext _db;
@@ -28,12 +29,12 @@ public class AccountService : IAccountService
         _db = db;
     }
 
-    // Accounts with everything AccountDto needs already loaded.
+    // Accounts with their roles and locations loaded, which AccountDto needs.
     private IQueryable<Account> AccountsWithLinks() => _db.Accounts
         .Include(a => a.AccountRoles).ThenInclude(ar => ar.Role)
         .Include(a => a.AccountLocations).ThenInclude(al => al.Location);
 
-    // ---------- READ ----------
+    // ---------- Read ----------
 
     public async Task<List<AccountDto>> GetAllAsync(string? search, int? roleId, bool includeInactive)
     {
@@ -42,7 +43,7 @@ public class AccountService : IAccountService
         if (!includeInactive)
             query = query.Where(a => a.IsActive);
 
-        // "Has this role" now means "has an ACTIVE AccountRoles row for it".
+        // An account only counts as having a role if its AccountRoles row is active.
         if (roleId.HasValue)
             query = query.Where(a => a.AccountRoles.Any(ar => ar.RoleId == roleId.Value && ar.IsActive));
 
@@ -65,7 +66,7 @@ public class AccountService : IAccountService
             : ServiceResult<AccountDto>.Ok(AccountDto.FromEntity(account));
     }
 
-    // ---------- CREATE ----------
+    // ---------- Create ----------
 
     public async Task<ServiceResult<AccountDto>> CreateAsync(CreateAccountRequest request, int adminAccountId)
     {
@@ -93,7 +94,7 @@ public class AccountService : IAccountService
         };
         account.PasswordHash = _hasher.HashPassword(account, request.Password);
 
-        // Add the role and location links to the account BEFORE saving...
+        // Add the role and location links to the account before saving it...
         foreach (var roleId in request.RoleIds.Distinct())
             account.AccountRoles.Add(new AccountRole { RoleId = roleId, AssignedAt = now, AssignedBy = adminAccountId, IsActive = true });
 
@@ -108,15 +109,15 @@ public class AccountService : IAccountService
                 IsActive = true
             });
 
-        // ...so ONE SaveChanges writes the account and all its links in a single transaction.
-        // Either everything is saved, or (if anything fails) nothing is. That's "atomic".
+        // ...so a single SaveChanges writes the account and all of its links in one transaction.
+        // Either everything is saved, or nothing is.
         _db.Accounts.Add(account);
         await _db.SaveChangesAsync();
 
         return await GetByIdAsync(account.AccountId);
     }
 
-    // ---------- UPDATE ----------
+    // ---------- Update ----------
 
     public async Task<ServiceResult<AccountDto>> UpdateAsync(int id, UpdateAccountRequest request, int adminAccountId)
     {
@@ -128,7 +129,7 @@ public class AccountService : IAccountService
         if (check != null)
             return ServiceResult<AccountDto>.BadRequest(check);
 
-        // Safety rules: an admin can't lock themselves out.
+        // An administrator can't lock themselves out.
         if (id == adminAccountId)
         {
             if (!request.IsActive)
@@ -157,9 +158,9 @@ public class AccountService : IAccountService
         {
             await using var transaction = await _db.Database.BeginTransactionAsync();
 
-            // Michael's database allows only ONE active default location per account, and it checks
-            // that after every single row change. So we first switch off the current default and
-            // save, and only then set the new one. Otherwise there'd be a moment with two defaults.
+            // The database allows only one active default location per account and checks this after
+            // every row change. So the current default is cleared and saved first, and only then is
+            // the new one set. Otherwise there would briefly be two defaults and the save would fail.
             foreach (var link in account.AccountLocations.Where(l => l.IsDefault))
                 link.IsDefault = false;
             await _db.SaveChangesAsync();
@@ -168,20 +169,20 @@ public class AccountService : IAccountService
             SyncLocations(account, request.LocationIds, request.DefaultLocationId, adminAccountId, now);
             await _db.SaveChangesAsync();
 
-            await transaction.CommitAsync();   // all of it, or (if anything failed) none of it
+            await transaction.CommitAsync(); // all of the changes are kept, or none of them
         }
         catch (DbUpdateConcurrencyException)
         {
-            // RowVersion changed between our read and our save: someone else edited it first.
+            // The RowVersion changed between loading and saving, so someone else edited it first.
             return ServiceResult<AccountDto>.Conflict("This account was changed by someone else. Reload and try again.");
         }
 
         return await GetByIdAsync(id);
     }
 
-    // Make the account's ACTIVE roles exactly match roleIds.
-    // SQL allows only ONE row per (account, role), so we switch rows on/off instead of
-    // deleting and re-adding them. Switched-off rows stay as history.
+    // Makes the account's active roles match roleIds exactly.
+    // SQL only allows one row per account and role, so rows are switched on or off instead of
+    // being deleted and added again. Inactive rows are kept as history.
     private static void SyncRoles(Account account, List<int> roleIds, int adminAccountId, DateTime now)
     {
         var wanted = roleIds.Distinct().ToList();
@@ -205,7 +206,7 @@ public class AccountService : IAccountService
             account.AccountRoles.Add(new AccountRole { RoleId = roleId, AssignedAt = now, AssignedBy = adminAccountId, IsActive = true });
     }
 
-    // Same idea for locations, plus exactly one default.
+    // Same as SyncRoles, but for locations, making sure exactly one of them is the default.
     private static void SyncLocations(Account account, List<int> locationIds, int? defaultLocationId,
                                       int adminAccountId, DateTime now)
     {
@@ -239,7 +240,7 @@ public class AccountService : IAccountService
             });
     }
 
-    // Shared checks for create and update. Returns an error message, or null if all good.
+    // Checks shared by create and update. Returns an error message, or null if everything is valid.
     private async Task<string?> CheckRolesAndLocationsAsync(List<int> roleIds, List<int> locationIds, int? defaultLocationId)
     {
         var roleNames = await _db.Roles.Where(r => roleIds.Contains(r.RoleId)).Select(r => r.RoleName).ToListAsync();
@@ -250,7 +251,7 @@ public class AccountService : IAccountService
         if (validLocations != locationIds.Distinct().Count())
             return "One or more location IDs do not exist or are deactivated.";
 
-        // Workers and Supervisors only see their own locations, so they need at least one.
+        // Workers and Supervisors only see their assigned locations, so they need at least one.
         var needsLocation = roleNames.Contains(RoleNames.Worker) || roleNames.Contains(RoleNames.Supervisor);
         if (needsLocation && locationIds.Count == 0)
             return "Workers and Supervisors must be assigned at least one location.";
@@ -261,10 +262,10 @@ public class AccountService : IAccountService
         return null;
     }
 
-    // ---------- DELETE (soft) ----------
+    // ---------- Delete (soft) ----------
 
-    // Accounts linked to old reports must stay, so we deactivate. RoleRefresher then
-    // rejects this person's token on their very next request.
+    // Accounts are linked to old reports, so they are deactivated instead of deleted.
+    // RoleRefresher then rejects this person's token on their next request.
     public async Task<ServiceResult<bool>> DeleteAsync(int id, int adminAccountId)
     {
         if (id == adminAccountId)

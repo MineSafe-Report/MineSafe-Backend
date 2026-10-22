@@ -3,7 +3,7 @@ using MineSafety.Api.Entities;
 
 namespace MineSafety.Api.Dtos;
 
-// What the API sends back for an account. Notice: NO password or hash in here.
+// An account as returned by the API. The password hash is deliberately left out.
 public class AccountDto
 {
     public int AccountId { get; set; }
@@ -12,10 +12,10 @@ public class AccountDto
     public string Email { get; set; } = "";
     public bool IsActive { get; set; }
     public DateTime CreatedAt { get; set; }
-    public List<RoleDto> Roles { get; set; } = new();                    // active roles only
-    public List<AssignedLocationDto> Locations { get; set; } = new();    // active locations only
+    public List<RoleDto> Roles { get; set; } = new();                 // active roles only
+    public List<AssignedLocationDto> Locations { get; set; } = new(); // active locations only
 
-    // Needs AccountRoles.Role and AccountLocations.Location loaded (.Include in the service).
+    // The service must load AccountRoles.Role and AccountLocations.Location (with Include) first.
     public static AccountDto FromEntity(Account a) => new()
     {
         AccountId = a.AccountId,
@@ -41,7 +41,7 @@ public class AccountDto
     };
 }
 
-// Sizes match database/schema/005_Accounts.sql
+// Body for POST /api/accounts. The maximum lengths match database/schema/005_Accounts.sql.
 public class CreateAccountRequest
 {
     [Required, MaxLength(50)]
@@ -54,20 +54,21 @@ public class CreateAccountRequest
     public string Email { get; set; } = "";
 
     [Required, MinLength(8), MaxLength(100)]
-    public string Password { get; set; } = "";       // hashed before saving, never stored as typed
+    public string Password { get; set; } = ""; // hashed before it is saved
 
-    // At least one role. An account can have more than one (e.g. Supervisor + SafetyOfficer).
+    // At least one role. An account can have more than one, for example Supervisor and SafetyOfficer.
     [Required, MinLength(1)]
     public List<int> RoleIds { get; set; } = new();
 
-    // Locations this person works at. Required for Workers and Supervisors.
+    // The locations this person works at. Required for Workers and Supervisors.
     public List<int> LocationIds { get; set; } = new();
 
-    // Which of LocationIds is pre-selected in the app. Defaults to the first one.
+    // The location pre-selected in the app. Defaults to the first one in LocationIds.
     public int? DefaultLocationId { get; set; }
 }
 
-// The FULL new state of the account. Roles/locations not in the lists get switched off.
+// Body for PUT /api/accounts/5. This is the complete new state of the account,
+// so any role or location missing from the lists is removed.
 public class UpdateAccountRequest
 {
     [Required, MaxLength(100)]
@@ -85,12 +86,12 @@ public class UpdateAccountRequest
 
     public bool IsActive { get; set; } = true;
 
-    // Optional. Fill it in only when the admin is resetting this person's password.
+    // Optional. Only filled in when an administrator resets the password.
     [MinLength(8), MaxLength(100)]
     public string? NewPassword { get; set; }
 }
 
-// For the role dropdown on the "create account" screen
+// A role, used for the role dropdown on the account screens.
 public class RoleDto
 {
     public int RoleId { get; set; }

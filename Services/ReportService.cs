@@ -18,18 +18,18 @@ public interface IReportService
     Task<ServiceResult<ReportDetailDto>> ReviewAsync(int id, CreateReviewRequest request, CurrentUser user);
     Task<ServiceResult<List<AuditEntryDto>>> GetAuditAsync(int id, CurrentUser user);
 
-    // Shared with AttachmentService so both use the SAME "who may see this report" rule.
+    // Shared with AttachmentService so both use the same rule for who may see a report.
     IQueryable<Report> VisibleTo(CurrentUser user);
     void AddAudit(int reportId, int actorId, string action, object? before, object? after);
 
-    // Called after every evidence upload: approves a Supervisor's own report once all of its
-    // expected photos / voice notes have arrived. Safe to call any number of times.
+    // Called after every evidence upload. Approves a Supervisor's own report once all of its
+    // expected photos and voice notes have arrived. Safe to call any number of times.
     Task TryAutoApproveAsync(int reportId, CurrentUser reporter);
 
-    // The report's status code + whether its evidence is complete (for the upload response).
+    // The report's status code and whether its evidence is complete (used in the upload response).
     Task<(string StatusCode, bool EvidenceComplete)> GetEvidenceStateAsync(int reportId);
 
-    // One-time clean-up of Supervisor reports stuck in Pending Review (Administrator only).
+    // One-off clean-up of Supervisor reports stuck in Pending Review (administrators only).
     Task<List<StuckReportDto>> ResolveStuckSupervisorReportsAsync(StuckReportsRequest request, int adminAccountId);
 }
 
@@ -43,17 +43,17 @@ public class ReportListFilter
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 20;
 
-    // [BindNever] = the app can't set these from the URL; the controller sets them per route.
-    [BindNever] public bool MineOnly { get; set; }             // only reports I submitted
-    [BindNever] public bool AssignedLocationsOnly { get; set; } // supervisor view: my locations, not my own reports
+    // [BindNever] means these can't be set from the URL. The controller sets them for each route.
+    [BindNever] public bool MineOnly { get; set; }              // only reports the user submitted
+    [BindNever] public bool AssignedLocationsOnly { get; set; } // supervisor view: their locations, excluding their own reports
     [BindNever] public bool IncidentsOnly { get; set; }         // Safety Officer view
 }
 
-// All the rules for reports. Every method follows the same pattern as LocationService:
-// load, check rules, change, save, return a DTO.
+// The business rules for reports. Most methods follow the same steps:
+// load the report, check the rules, make the change, save it and return a DTO.
 public class ReportService : IReportService
 {
-    // Audit actions for approvals that were NOT a manual supervisor review.
+    // Audit log actions for approvals that didn't come from a supervisor's review.
     public const string AutoApprovedAction = "AUTO_APPROVED";
     public const string LegacyAutoApprovedAction = "AUTO_APPROVED_BY_ADMIN_CHECK";
 
@@ -66,14 +66,14 @@ public class ReportService : IReportService
         _config = config;
     }
 
-    // =====================================================================
-    //  WHO MAY SEE WHICH REPORTS  (used by every read, edit, review and file download)
-    // =====================================================================
-    //  Everyone        : their own reports
-    //  Supervisor      : + every report at their assigned locations
-    //  Safety Officer  : + every INCIDENT in the mine that isn't denied (read-only)
-    //  Administrator   : no report access (manages accounts and locations only)
-    //  Withdrawn reports (IsActive = false) are hidden from everyone.
+    // ---------- Visibility ----------
+
+    // Which reports a user may see. Used by every read, edit, review and file download.
+    //   Everyone:        their own reports
+    //   Supervisor:      plus every report at their assigned locations
+    //   Safety Officer:  plus every active report in the mine (read-only)
+    //   Administrator:   no reports (they only manage accounts and locations)
+    // Withdrawn reports (IsActive = false) are hidden from everyone.
     public IQueryable<Report> VisibleTo(CurrentUser user)
     {
         var isSupervisor = user.IsInRole(RoleNames.Supervisor);
@@ -84,7 +84,7 @@ public class ReportService : IReportService
         return _db.Reports.Where(r => r.IsActive && (
             r.ReporterAccountId == user.AccountId
             || (isSupervisor && (supervisorSeesAll || locations.Contains(r.LocationId)))
-            || (isOfficer && r.IncidentType.TriggersImmediateAlert && r.Status.StatusName != ReportStatusNames.Denied)));
+            || isOfficer));
     }
 
     private IQueryable<Report> WithDetails(IQueryable<Report> query) => query
@@ -95,9 +95,8 @@ public class ReportService : IReportService
         .Include(r => r.Reviews).ThenInclude(rv => rv.Reviewer)
         .Include(r => r.Attachments);
 
-    // =====================================================================
-    //  CREATE  (POST /api/reports)
-    // =====================================================================
+    // ---------- Create (POST /api/reports) ----------
+
     public async Task<ServiceResult<SubmitReportResponse>> SubmitAsync(CreateReportRequest request, CurrentUser user)
     {
         if (request.ClientReportId == Guid.Empty)
@@ -111,14 +110,14 @@ public class ReportService : IReportService
         if (incidentType == null)
             return ServiceResult<SubmitReportResponse>.BadRequest("Unknown report type. Use INCIDENT, HAZARD or NEAR_MISS.", "UNKNOWN_TYPE");
 
-        // 1. DUPLICATE CHECK. Have we already got a report with this ClientReportId?
-        //    This happens when the phone uploaded it, but lost signal before our reply arrived,
-        //    so it tries again. We must NOT save it twice.
+        // 1. Check whether a report with this ClientReportId was already received. This happens when
+        //    the phone uploaded it but lost signal before the reply arrived, so it sends it again.
+        //    The report must not be saved twice.
         var duplicate = await CheckForDuplicateAsync(request, incidentType.IncidentTypeId, occurredAt, user);
         if (duplicate != null)
             return duplicate;
 
-        // 2. Normal checks.
+        // 2. Validate the location.
         var location = await _db.Locations.FirstOrDefaultAsync(l => l.LocationId == request.LocationId && l.IsActive);
         if (location == null || !user.CanSeeLocation(location.LocationId))
             return ServiceResult<SubmitReportResponse>.BadRequest("You can't report at this location.", "LOCATION_NOT_ALLOWED");
@@ -129,41 +128,40 @@ public class ReportService : IReportService
         var report = new Report
         {
             ClientReportId = request.ClientReportId,
-            // The reporter is ALWAYS the logged-in user, never something the app sends.
+            // The reporter is always the logged-in user, never a value sent by the app.
             ReporterAccountId = user.AccountId,
             IncidentTypeId = incidentType.IncidentTypeId,
             LocationId = location.LocationId,
             StatusId = pendingStatusId,
             Description = (request.Description ?? "").Trim(),
             OccurredAt = occurredAt,
-            // No count sent = nothing expected. Stored so "evidence complete" survives restarts.
+            // No count sent means nothing is expected. Stored so the evidence check still works after a restart.
             ExpectedImageCount = request.ExpectedImageCount ?? 0,
             ExpectedVoiceNoteCount = request.ExpectedVoiceNoteCount ?? 0,
             IsActive = true,
             CreatedAt = now,
             SubmittedAt = now,
-            // ReportNumber must be unique and can't be empty, but the nice number (MS-2026-00042)
-            // uses the ReportID, which SQL only gives us after the INSERT. So we save a temporary
-            // number first (unique because ClientReportId is unique), then replace it.
+            // ReportNumber must be unique and can't be empty, but the final number (MS-2026-00042)
+            // uses the ReportID, which only exists after the INSERT. So a temporary number is saved
+            // first (unique because ClientReportId is unique) and replaced straight after.
             ReportNumber = "TMP-" + request.ClientReportId.ToString("N")
         };
 
-        // 3. Save the report, its number, the audit row and the notifications in ONE transaction.
+        // 3. Save the report, its number, the audit entry and the notifications in one transaction.
         try
         {
             await using var transaction = await _db.Database.BeginTransactionAsync();
 
             _db.Reports.Add(report);
-            await _db.SaveChangesAsync();                          // INSERT, SQL fills in ReportId
+            await _db.SaveChangesAsync(); // INSERT, SQL Server generates the ReportId
 
             report.ReportNumber = $"MS-{now:yyyy}-{report.ReportId:D5}";
             AddAudit(report.ReportId, user.AccountId, "CREATED", null, Snapshot(report));
             await AddNewReportNotificationsAsync(report, incidentType, location, user.AccountId);
 
-            // A Supervisor can't review their own report, so their reports are approved
-            // automatically. With no photos / voice notes expected, that happens right now,
-            // in the same transaction. Otherwise it happens when the last file arrives
-            // (TryAutoApproveAsync, called by AttachmentService).
+            // A Supervisor can't review their own report, so it is approved automatically.
+            // If no photos or voice notes are expected, that happens now, in the same transaction.
+            // Otherwise it happens when the last file arrives (TryAutoApproveAsync, called by AttachmentService).
             if (IsSupervisor(user) && CanAutoApprove(report, receivedImages: 0, receivedVoiceNotes: 0))
                 await ApplyAutoApprovalAsync(report, incidentType, location, user.AccountId, AutoApprovedAction,
                     "Submitted by a supervisor; approved automatically with no evidence outstanding.");
@@ -174,8 +172,8 @@ public class ReportService : IReportService
         }
         catch (DbUpdateException)
         {
-            // Two copies of the same report arrived at the same moment and the other one won.
-            // The database's UNIQUE rule on ClientReportId stopped this one: our final safety net.
+            // Two copies of the same report arrived at the same moment and the other one was saved first.
+            // The unique constraint on ClientReportId rejected this one, so treat it as a retry.
             _db.ChangeTracker.Clear();
             var retry = await CheckForDuplicateAsync(request, incidentType.IncidentTypeId, occurredAt, user);
             if (retry != null)
@@ -187,7 +185,7 @@ public class ReportService : IReportService
         return ServiceResult<SubmitReportResponse>.Ok(new SubmitReportResponse { AlreadyExisted = false, Report = saved! });
     }
 
-    // null = not a duplicate. Otherwise: the answer to send back.
+    // Returns null if this isn't a duplicate, otherwise the response to send back.
     private async Task<ServiceResult<SubmitReportResponse>?> CheckForDuplicateAsync(
         CreateReportRequest request, int incidentTypeId, DateTime occurredAt, CurrentUser user)
     {
@@ -196,7 +194,7 @@ public class ReportService : IReportService
         if (existing == null)
             return null;
 
-        // Same ID but different person or different content = not a retry, something is wrong.
+        // The same ID with a different reporter or different content isn't a retry, so it's rejected.
         var sameReport = existing.ReporterAccountId == user.AccountId
             && existing.IncidentTypeId == incidentTypeId
             && existing.LocationId == request.LocationId
@@ -208,7 +206,7 @@ public class ReportService : IReportService
                 "This clientReportId was already used for a different report. Generate a new ID for a new report.",
                 "CLIENT_ID_CONFLICT");
 
-        // A genuine retry: hand back the report we already have, unchanged.
+        // A genuine retry: return the existing report unchanged.
         var details = await WithDetails(_db.Reports.AsNoTracking()).FirstAsync(r => r.ReportId == existing.ReportId);
         return ServiceResult<SubmitReportResponse>.Ok(new SubmitReportResponse
         {
@@ -217,10 +215,8 @@ public class ReportService : IReportService
         });
     }
 
-    // Who gets told about a new report:
-    //  - every Supervisor assigned to that location
-    //  - for Incidents: every Safety Officer as well
-    // The reporter themselves is never notified about their own report.
+    // Notifies every Supervisor assigned to the report's location, and for incidents every
+    // Safety Officer as well. The reporter is never notified about their own report.
     private async Task AddNewReportNotificationsAsync(Report report, IncidentType type, Location location, int reporterId)
     {
         var urgent = type.TriggersImmediateAlert;
@@ -242,9 +238,8 @@ public class ReportService : IReportService
             AddNotification(accountId, report.ReportId, urgent ? NotificationTypes.IncidentAlert : NotificationTypes.NewReport, message);
     }
 
-    // =====================================================================
-    //  READ
-    // =====================================================================
+    // ---------- Read ----------
+
     public async Task<PagedResult<ReportSummaryDto>> ListAsync(CurrentUser user, ReportListFilter filter)
     {
         var page = Math.Max(1, filter.Page);
@@ -258,7 +253,7 @@ public class ReportService : IReportService
         if (filter.AssignedLocationsOnly)
         {
             var locations = user.AllowedLocationIds;
-            query = query.Where(r => r.ReporterAccountId != user.AccountId);      // you can't review your own
+            query = query.Where(r => r.ReporterAccountId != user.AccountId); // supervisors can't review their own reports
             if (locations != null)
                 query = query.Where(r => locations.Contains(r.LocationId));
         }
@@ -290,8 +285,8 @@ public class ReportService : IReportService
 
         var total = await query.CountAsync();
 
-        // Pending reviews: urgent first, then oldest first (first come, first served).
-        // Everything else: newest first.
+        // The pending review queue shows urgent reports first, then the oldest first.
+        // Every other list shows the newest first.
         var pendingQueue = filter.AssignedLocationsOnly
             && (await ResolveStatusNameAsync(filter.Status ?? "")) == ReportStatusNames.PendingReview;
         query = pendingQueue
@@ -314,7 +309,7 @@ public class ReportService : IReportService
 
     public async Task<ServiceResult<ReportDetailDto>> GetByIdAsync(int id, CurrentUser user)
     {
-        // VisibleTo means: if you're not allowed to see it, it simply isn't found (404).
+        // A report the user isn't allowed to see is reported as not found (404).
         var detail = await LoadDetailAsync(id, user);
         return detail == null
             ? ServiceResult<ReportDetailDto>.NotFound($"Report {id} was not found.")
@@ -327,9 +322,9 @@ public class ReportService : IReportService
         return report == null ? null : ToDetail(report, user);
     }
 
-    // =====================================================================
-    //  UPDATE  (PUT /api/reports/5) : the reporter, only while Pending Review
-    // =====================================================================
+    // ---------- Update (PUT /api/reports/5) ----------
+
+    // Only the reporter, and only while the report is Pending Review.
     public async Task<ServiceResult<ReportDetailDto>> UpdateAsync(int id, UpdateReportRequest request, CurrentUser user)
     {
         var report = await WithDetails(VisibleTo(user)).FirstOrDefaultAsync(r => r.ReportId == id);
@@ -360,12 +355,12 @@ public class ReportService : IReportService
         report.OccurredAt = occurredAt;
         report.UpdatedAt = DateTime.UtcNow;
 
-        // The audit row records exactly what changed, from what, to what, and by whom.
+        // The audit entry records what changed, the old and new values, and who changed it.
         AddAudit(report.ReportId, user.AccountId, "EDITED", before, Snapshot(report));
 
         try
         {
-            await _db.SaveChangesAsync();        // the edit + its audit row, together
+            await _db.SaveChangesAsync(); // saves the edit and its audit entry together
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -375,9 +370,9 @@ public class ReportService : IReportService
         return await GetByIdAsync(id, user);
     }
 
-    // =====================================================================
-    //  DELETE (soft)  (DELETE /api/reports/5) : the reporter, only while Pending Review
-    // =====================================================================
+    // ---------- Withdraw (DELETE /api/reports/5) ----------
+
+    // A soft delete. Only the reporter, and only while the report is Pending Review.
     public async Task<ServiceResult<bool>> WithdrawAsync(int id, CurrentUser user)
     {
         var report = await WithDetails(VisibleTo(user)).FirstOrDefaultAsync(r => r.ReportId == id);
@@ -397,9 +392,9 @@ public class ReportService : IReportService
         return ServiceResult<bool>.Ok(true);
     }
 
-    // =====================================================================
-    //  REVIEW  (POST /api/supervisor/reports/5/review) : Supervisors only
-    // =====================================================================
+    // ---------- Review (POST /api/supervisor/reports/5/review) ----------
+
+    // Supervisors only.
     public async Task<ServiceResult<ReportDetailDto>> ReviewAsync(int id, CreateReviewRequest request, CurrentUser user)
     {
         var decision = ReviewDecisions.Normalise(request.Decision);
@@ -420,8 +415,8 @@ public class ReportService : IReportService
         var reason = (request.Reason ?? request.Comment)?.Trim();
         var denied = decision == ReviewDecisions.Denied;
 
-        // Nobody may APPROVE while promised photos / voice notes are still uploading.
-        // (Denying stays possible, e.g. when the evidence is never going to arrive.)
+        // A report can't be approved while expected photos or voice notes are still uploading.
+        // Denying is still allowed, for example when the evidence is never going to arrive.
         if (!denied && !EvidenceComplete(report))
             return ServiceResult<ReportDetailDto>.Conflict(
                 $"This report is still waiting for evidence ({MissingEvidenceText(report)}). Try again once it has uploaded.",
@@ -432,7 +427,7 @@ public class ReportService : IReportService
         var before = Snapshot(report);
         var now = DateTime.UtcNow;
 
-        // 1. the review itself
+        // 1. The review itself.
         _db.ReportReviews.Add(new ReportReview
         {
             ReportId = report.ReportId,
@@ -442,22 +437,22 @@ public class ReportService : IReportService
             ReviewedAt = now
         });
 
-        // 2. the report's new status
+        // 2. The report's new status.
         var newStatus = denied ? ReportStatusNames.Denied : ReportStatusNames.Approved;
         report.StatusId = await GetStatusIdAsync(newStatus);
         report.UpdatedAt = now;
 
-        // 3. the audit row
+        // 3. The audit entry.
         var after = Snapshot(report);
         after["status"] = newStatus;
         after["reason"] = reason;
         AddAudit(report.ReportId, user.AccountId, decision, before, after);
 
-        // 4. tell the worker (their "Report confirmation" user story)
+        // 4. Let the reporter know the outcome.
         AddNotification(report.ReporterAccountId, report.ReportId, NotificationTypes.ReportReviewed,
             $"Your report {report.ReportNumber} was {newStatus.ToLower()}." + (denied ? $" Reason: {reason}" : ""));
 
-        // 5. an APPROVED Incident is also reported to the Safety Officers
+        // 5. Approved incidents are also sent to the Safety Officers.
         if (!denied && report.IncidentType.TriggersImmediateAlert)
         {
             foreach (var officerId in (await SafetyOfficerIdsAsync()).Distinct().Where(o => o != user.AccountId))
@@ -465,7 +460,7 @@ public class ReportService : IReportService
                     $"Incident {report.ReportNumber} at {report.Location.LocationName} was approved by a supervisor.");
         }
 
-        // All of it saved together, or not at all. RowVersion stops two reviews racing each other.
+        // Everything is saved together or not at all. RowVersion stops two reviews of the same report clashing.
         try
         {
             await _db.SaveChangesAsync();
@@ -478,9 +473,9 @@ public class ReportService : IReportService
         return await GetByIdAsync(id, user);
     }
 
-    // =====================================================================
-    //  AUDIT HISTORY  (GET /api/reports/5/audit) : Safety Officers
-    // =====================================================================
+    // ---------- Audit history (GET /api/reports/5/audit) ----------
+
+    // Safety Officers only.
     public async Task<ServiceResult<List<AuditEntryDto>>> GetAuditAsync(int id, CurrentUser user)
     {
         if (!await VisibleTo(user).AnyAsync(r => r.ReportId == id))
@@ -503,19 +498,14 @@ public class ReportService : IReportService
         }).ToList());
     }
 
-    // =====================================================================
-    //  SMALL HELPERS
-    // =====================================================================
+    // ---------- Automatic approval of a Supervisor's own report ----------
 
-    // =====================================================================
-    //  AUTOMATIC APPROVAL OF A SUPERVISOR'S OWN REPORT
-    // =====================================================================
     // Rules:
-    //  - Only for reports whose reporter is a Supervisor (decided on the SERVER from the account's
-    //    current roles, never from anything the app sends).
-    //  - Only once every expected photo and voice note has arrived.
-    //  - Only from Pending Review, so retries and duplicate uploads can never approve twice.
-    //  - No ReportReviews row is written (nobody reviewed it); the audit log says AUTO_APPROVED.
+    //   - Only for reports submitted by a Supervisor. This is decided on the server from the
+    //     account's current roles, never from anything the app sends.
+    //   - Only once every expected photo and voice note has arrived.
+    //   - Only from Pending Review, so retries and duplicate uploads can't approve it twice.
+    //   - No ReportReviews row is written, since nobody reviewed it. The audit log records AUTO_APPROVED.
     public async Task TryAutoApproveAsync(int reportId, CurrentUser reporter)
     {
         if (!IsSupervisor(reporter))
@@ -543,8 +533,8 @@ public class ReportService : IReportService
         }
         catch (DbUpdateConcurrencyException)
         {
-            // Another request changed this report at the same moment (e.g. the final two uploads
-            // arrived together and the other one approved it). Nothing to do: it's handled once.
+            // Another request changed this report at the same moment, for example when the last two
+            // uploads arrived together and the other one already approved it. Nothing else to do.
             _db.ChangeTracker.Clear();
         }
     }
@@ -558,8 +548,8 @@ public class ReportService : IReportService
         return (Codes.From(report.Status.StatusName), EvidenceComplete(report));
     }
 
-    // Status -> Approved, audit row, and (for Incidents) the Safety Officer notification.
-    // Does NOT save: the caller saves, so it lands in the caller's transaction.
+    // Sets the status to Approved, adds the audit entry and, for incidents, notifies the Safety Officers.
+    // It doesn't save. The caller saves, so the changes are part of the caller's transaction.
     private async Task ApplyAutoApprovalAsync(Report report, IncidentType type, Location location,
                                               int actorId, string auditAction, string reason)
     {
@@ -583,8 +573,8 @@ public class ReportService : IReportService
 
     private static bool IsSupervisor(CurrentUser user) => user.IsInRole(RoleNames.Supervisor);
 
-    // Auto-approval needs KNOWN expectations (reports from before migration 003 have none)
-    // and every expected file received.
+    // Auto-approval needs known expected counts (reports from before migration 003 don't have them)
+    // and every expected file to have arrived.
     private static bool CanAutoApprove(Report r, int receivedImages, int receivedVoiceNotes) =>
         r.ExpectedImageCount.HasValue && r.ExpectedVoiceNoteCount.HasValue
         && receivedImages >= r.ExpectedImageCount.Value
@@ -596,7 +586,7 @@ public class ReportService : IReportService
         return (files.Count(a => a.AttachmentType == "PHOTO"), files.Count(a => a.AttachmentType == "VOICE_NOTE"));
     }
 
-    // Unknown expectations count as "nothing outstanding".
+    // Unknown expected counts are treated as nothing outstanding.
     private static bool EvidenceComplete(Report r)
     {
         var (images, voiceNotes) = ReceivedCounts(r);
@@ -614,15 +604,14 @@ public class ReportService : IReportService
         return string.Join(" and ", parts);
     }
 
-    // =====================================================================
-    //  ONE-TIME CLEAN-UP: Supervisor reports stuck in Pending Review
-    // =====================================================================
+    // ---------- One-off clean-up: Supervisor reports stuck in Pending Review ----------
+
     // Finds active Pending Review reports whose reporter currently has the Supervisor role.
-    //  - Expected counts known + all evidence received  -> approve (AUTO_APPROVED)
-    //  - Expected counts known + evidence missing       -> leave; it approves itself when it arrives
-    //  - Created before migration 003 (counts unknown)  -> only approved if an administrator lists
-    //    its ID in ConfirmLegacyReportIds after checking it (AUTO_APPROVED_BY_ADMIN_CHECK, actor = admin)
-    // DryRun (the default) changes nothing and just reports what would happen.
+    //   - Expected counts known and all evidence received: approved (AUTO_APPROVED).
+    //   - Expected counts known but evidence missing: left alone, it approves itself when the evidence arrives.
+    //   - Created before migration 003 (counts unknown): only approved if an administrator has checked it
+    //     and listed its ID in ConfirmLegacyReportIds (AUTO_APPROVED_BY_ADMIN_CHECK, with the admin as the actor).
+    // DryRun (the default) changes nothing and only reports what would happen.
     public async Task<List<StuckReportDto>> ResolveStuckSupervisorReportsAsync(StuckReportsRequest request, int adminAccountId)
     {
         var supervisorIds = await _db.AccountRoles
@@ -691,12 +680,14 @@ public class ReportService : IReportService
         }
 
         if (!request.DryRun)
-            await _db.SaveChangesAsync();      // all approvals, audit rows and notifications together
+            await _db.SaveChangesAsync(); // all approvals, audit entries and notifications together
 
         return results;
     }
 
-    // Only the reporter, only while it's still waiting for review.
+    // ---------- Helpers ----------
+
+    // Only the reporter, and only while the report is still waiting for review.
     private static bool CanEdit(Report report, CurrentUser user) =>
         report.ReporterAccountId == user.AccountId && report.Status.StatusName == ReportStatusNames.PendingReview;
 
@@ -706,7 +697,7 @@ public class ReportService : IReportService
         && report.Status.StatusName == ReportStatusNames.PendingReview
         && user.CanSeeLocation(report.LocationId);
 
-    // Finds the incident type from a code (INCIDENT) or an ID. There are only 3 rows, so we just load them.
+    // Finds the incident type from a code (INCIDENT) or an ID. There are only three rows, so they are all loaded.
     private async Task<IncidentType?> ResolveTypeAsync(string? typeCode, int? incidentTypeId)
     {
         var types = await _db.IncidentTypes.Where(t => t.IsActive).ToListAsync();
@@ -749,15 +740,15 @@ public class ReportService : IReportService
         });
     }
 
-    // Store every time in UTC so all phones and the server agree.
+    // All times are stored in UTC so the phones and the server agree.
     private static DateTime ToUtc(DateTime value) => value.Kind switch
     {
         DateTimeKind.Utc => value,
         DateTimeKind.Local => value.ToUniversalTime(),
-        _ => DateTime.SpecifyKind(value, DateTimeKind.Utc)      // no zone given: assume UTC
+        _ => DateTime.SpecifyKind(value, DateTimeKind.Utc) // no time zone given, so assume UTC
     };
 
-    // The fields we record in the audit log (never anything secret).
+    // The fields recorded in the audit log. Nothing sensitive is included.
     private static Dictionary<string, object?> Snapshot(Report r) => new()
     {
         ["reportNumber"] = r.ReportNumber,
@@ -784,7 +775,7 @@ public class ReportService : IReportService
         });
     }
 
-    // Fills in everything a list line needs. Used for both summary and detail.
+    // Fills in the fields shared by the summary and detail DTOs.
     private static T Fill<T>(T dto, Report r) where T : ReportSummaryDto
     {
         var lastReview = r.Reviews.OrderByDescending(rv => rv.ReviewedAt).FirstOrDefault();
@@ -812,7 +803,7 @@ public class ReportService : IReportService
         dto.ExpectedImageCount = r.ExpectedImageCount;
         dto.ExpectedVoiceNoteCount = r.ExpectedVoiceNoteCount;
         dto.EvidenceComplete = EvidenceComplete(r);
-        // Approved, but no supervisor approved it in ReportReviews = approved automatically.
+        // Approved without an APPROVED review means it was approved automatically.
         dto.AutoApproved = r.Status.StatusName == ReportStatusNames.Approved
                            && !r.Reviews.Any(rv => rv.Decision == ReviewDecisions.Approved);
         return dto;
@@ -842,7 +833,7 @@ public class ReportService : IReportService
         dto.CanWithdraw = CanEdit(r, user);
         dto.CanReview = CanReview(r, user);
 
-        // Web dashboard link for Safety Officers, e.g. "http://localhost:5173/incidents/{id}".
+        // Web dashboard link for Safety Officers, for example "http://localhost:5173/incidents/{id}".
         var template = _config["Web:ReportUrlTemplate"];
         if (user.IsInRole(RoleNames.SafetyOfficer) && !string.IsNullOrWhiteSpace(template))
             dto.DashboardUrl = template.Replace("{id}", r.ReportId.ToString());

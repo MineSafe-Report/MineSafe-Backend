@@ -4,7 +4,8 @@ using MineSafety.Api.Services;
 
 namespace MineSafety.Api.Controllers;
 
-// Handles /api/notifications : the alerts screen. You only ever see your own.
+// Endpoints under /api/notifications, used by the alerts screen.
+// Users only ever see their own notifications.
 [Route("api/notifications")]
 [Authorize]
 public class NotificationsController : ApiControllerBase
@@ -24,7 +25,7 @@ public class NotificationsController : ApiControllerBase
         return Ok(await _notifications.GetMineAsync(CurrentAccountId, unreadOnly, page, pageSize));
     }
 
-    // POST (or PUT) /api/notifications/5/read
+    // POST or PUT /api/notifications/5/read
     [HttpPost("{id:int}/read")]
     [HttpPut("{id:int}/read")]
     public async Task<IActionResult> MarkRead(int id)
@@ -33,7 +34,7 @@ public class NotificationsController : ApiControllerBase
         return result.Success ? Ok(result.Value) : ErrorResponse(result);
     }
 
-    // POST (or PUT) /api/notifications/read-all
+    // POST or PUT /api/notifications/read-all
     [HttpPost("read-all")]
     [HttpPut("read-all")]
     public async Task<IActionResult> MarkAllRead()
