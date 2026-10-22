@@ -131,7 +131,7 @@ if (app.Environment.IsDevelopment())
             "Run scripts/create-local-db.ps1 first.");
     }
 
-    // The API expects the columns added by database/migrations/003_AddEvidenceTracking.sql.
+    // The API expects the columns added by database/migrations/AddEvidenceTracking.sql.
     try
     {
         _ = db.Reports.Select(r => r.ExpectedImageCount).FirstOrDefault();
@@ -141,7 +141,7 @@ if (app.Environment.IsDevelopment())
     {
         app.Logger.LogCritical(ex,
             "The database is missing the evidence-tracking columns. Run " +
-            "database/migrations/003_AddEvidenceTracking.sql against this database.");
+            "database/migrations/AddEvidenceTracking.sql against this database.");
     }
 
     app.UseSwagger();

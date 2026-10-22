@@ -11,7 +11,7 @@ whose evidence never arrived.
 
 ## Step 1: update the database
 ```powershell
-sqlcmd -S "(localdb)\MSSQLLocalDB" -E -d MineSafetyDb -b -i database/migrations/003_AddEvidenceTracking.sql
+sqlcmd -S "(localdb)\MSSQLLocalDB" -E -d MineSafetyDb -b -i database/migrations/AddEvidenceTracking.sql
 ```
 
 ## Step 2: look first (read-only)

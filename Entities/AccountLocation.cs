@@ -1,6 +1,6 @@
 namespace MineSafety.Api.Entities;
 
-// Matches database/schema/007_AccountLocations.sql
+// Matches database/schema/AccountLocations.sql
 // One row = "this account works at / may see this location".
 // This is what stops a supervisor at Tunnel 7 from seeing Stope 12B's reports.
 public class AccountLocation

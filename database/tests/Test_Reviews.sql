@@ -1,4 +1,3 @@
--- Uses an existing report and a different existing account; makes no lasting change.
 SET XACT_ABORT OFF; BEGIN TRANSACTION;
 BEGIN TRY
     DECLARE @R INT=(SELECT TOP(1) ReportID FROM Reports ORDER BY ReportID), @A INT=(SELECT TOP(1) AccountID FROM Accounts ORDER BY AccountID);

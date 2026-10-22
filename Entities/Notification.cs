@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MineSafety.Api.Entities;
 
-// Matches database/schema/012_Notifications.sql : alerts shown in the app.
+// Matches database/schema/Notifications.sql : alerts shown in the app.
 public class Notification
 {
     public int NotificationId { get; set; }          // NotificationID (PK)
