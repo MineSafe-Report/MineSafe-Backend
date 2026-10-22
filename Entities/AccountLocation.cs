@@ -1,6 +1,6 @@
 namespace MineSafety.Api.Entities;
 
-// Maps to the AccountLocations table (database/schema/007_AccountLocations.sql).
+// Maps to the AccountLocations table (database/schema/AccountLocations.sql).
 // Each row means "this account works at, and may see, this location". This is what keeps a
 // supervisor at Tunnel 7 from seeing the reports for Stope 12B.
 public class AccountLocation

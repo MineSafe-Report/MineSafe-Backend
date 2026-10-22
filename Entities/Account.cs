@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MineSafety.Api.Entities;
 
-// Maps to the Accounts table (database/schema/005_Accounts.sql).
+// Maps to the Accounts table (database/schema/Accounts.sql).
 // Accounts has no RoleID column. Roles are linked through AccountRoles and locations through
 // AccountLocations, so one account can have several of each.
 public class Account

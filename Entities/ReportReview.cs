@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MineSafety.Api.Entities;
 
-// Maps to the ReportReviews table (database/schema/010_ReportReviews.sql):
+// Maps to the ReportReviews table (database/schema/ReportReviews.sql):
 // a supervisor's decision to approve or deny a report.
 public class ReportReview
 {

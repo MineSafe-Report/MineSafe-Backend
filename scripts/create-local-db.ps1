@@ -1,12 +1,12 @@
-# Creates the local development database from Michael's SQL scripts.
-# It does NOT change the scripts; it just runs database/schema/*.sql in order.
+# Creates the local development database from the SQL scripts in database/schema.
+# It doesn't change the scripts, it only runs them in the right order.
 #
 # Usage (from the repo folder, in PowerShell):
 #     ./scripts/create-local-db.ps1
 #
-# Needs the "sqlcmd" tool (comes with SQL Server / SSMS; or: winget install sqlcmd).
-# No sqlcmd? Open SSMS, connect to (localdb)\MSSQLLocalDB, create a database called
-# MineSafetyDb, then open and run each file in database/schema in number order.
+# Needs the sqlcmd tool (included with SQL Server and SSMS, or: winget install sqlcmd).
+# Without sqlcmd: open SSMS, connect to (localdb)\MSSQLLocalDB, create a database called
+# MineSafetyDb, then run each file in database/schema in the order listed below.
 
 param(
     [string]$Server = "(localdb)\MSSQLLocalDB",
@@ -28,10 +28,20 @@ if ($exists.Trim() -eq "1") {
     exit 0
 }
 
-Get-ChildItem $schemaFolder -Filter "*.sql" | Sort-Object Name | ForEach-Object {
-    Write-Host "  running $($_.Name)"
-    sqlcmd -S $Server -E -d $Database -b -i $_.FullName
-    if ($LASTEXITCODE -ne 0) { throw "Failed while running $($_.Name)" }
+# The tables must be created in this order, because each one can only reference tables
+# that already exist (for example AccountRoles needs Accounts and Roles first).
+$tables = @(
+    "Roles", "IncidentTypes", "ReportStatuses", "Locations",
+    "Accounts", "AccountRoles", "AccountLocations",
+    "Reports", "ReportAttachments", "ReportReviews", "ReportAuditLog", "Notifications"
+)
+
+foreach ($table in $tables) {
+    $file = Join-Path $schemaFolder "$table.sql"
+    Write-Host "  running $table.sql"
+    # -I turns on QUOTED_IDENTIFIER, which SQL Server needs for the filtered indexes.
+    sqlcmd -S $Server -E -d $Database -b -I -i $file
+    if ($LASTEXITCODE -ne 0) { throw "Failed while running $table.sql" }
 }
 
 Write-Host "Done. Start the API (F5); in Development it adds test data automatically."

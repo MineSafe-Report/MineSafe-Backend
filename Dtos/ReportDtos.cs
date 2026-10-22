@@ -214,7 +214,7 @@ public class StuckReportsRequest
     // True (the default) only lists what would happen and changes nothing.
     public bool DryRun { get; set; } = true;
 
-    // Reports created before migration 003 have no expected counts, so the server can't tell
+    // Reports created before the AddEvidenceTracking migration have no expected counts, so the server can't tell
     // whether evidence is still missing. They are only approved if their ID is listed here,
     // after someone has checked them (for example, the supervisor's phone has nothing left to upload).
     public List<int> ConfirmLegacyReportIds { get; set; } = new();

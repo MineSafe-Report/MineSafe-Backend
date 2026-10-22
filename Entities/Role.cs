@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MineSafety.Api.Entities;
 
-// Maps to the Roles table (database/schema/001_Roles.sql).
+// Maps to the Roles table (database/schema/Roles.sql).
 // Each entity class mirrors one database table, with one property per column.
 public class Role
 {

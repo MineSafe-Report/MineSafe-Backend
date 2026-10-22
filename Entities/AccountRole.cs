@@ -1,6 +1,6 @@
 namespace MineSafety.Api.Entities;
 
-// Maps to the AccountRoles table (database/schema/006_AccountRoles.sql).
+// Maps to the AccountRoles table (database/schema/AccountRoles.sql).
 // Each row means "this account has this role". When a role is removed the row is
 // marked inactive instead of deleted, so the history is kept.
 public class AccountRole

@@ -573,7 +573,7 @@ public class ReportService : IReportService
 
     private static bool IsSupervisor(CurrentUser user) => user.IsInRole(RoleNames.Supervisor);
 
-    // Auto-approval needs known expected counts (reports from before migration 003 don't have them)
+    // Auto-approval needs known expected counts (reports from before the AddEvidenceTracking migration don't have them)
     // and every expected file to have arrived.
     private static bool CanAutoApprove(Report r, int receivedImages, int receivedVoiceNotes) =>
         r.ExpectedImageCount.HasValue && r.ExpectedVoiceNoteCount.HasValue
@@ -609,7 +609,7 @@ public class ReportService : IReportService
     // Finds active Pending Review reports whose reporter currently has the Supervisor role.
     //   - Expected counts known and all evidence received: approved (AUTO_APPROVED).
     //   - Expected counts known but evidence missing: left alone, it approves itself when the evidence arrives.
-    //   - Created before migration 003 (counts unknown): only approved if an administrator has checked it
+    //   - Created before the AddEvidenceTracking migration (counts unknown): only approved if an administrator has checked it
     //     and listed its ID in ConfirmLegacyReportIds (AUTO_APPROVED_BY_ADMIN_CHECK, with the admin as the actor).
     // DryRun (the default) changes nothing and only reports what would happen.
     public async Task<List<StuckReportDto>> ResolveStuckSupervisorReportsAsync(StuckReportsRequest request, int adminAccountId)

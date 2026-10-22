@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MineSafety.Api.Entities;
 
-// Maps to the Reports table (database/schema/008_Reports.sql), the main table in the system.
+// Maps to the Reports table (database/schema/Reports.sql), the main table in the system.
 public class Report
 {
     public int ReportId { get; set; }              // ReportID (primary key, identity)
@@ -33,7 +33,7 @@ public class Report
 
     // How many photos and voice notes the phone said it would upload after the report.
     // The evidence is complete once that many have arrived. Null means unknown (reports created
-    // before migration 003) and is treated as "nothing expected".
+    // before the AddEvidenceTracking migration) and is treated as "nothing expected".
     public int? ExpectedImageCount { get; set; }
     public int? ExpectedVoiceNoteCount { get; set; }
 

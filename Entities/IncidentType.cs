@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MineSafety.Api.Entities;
 
-// Maps to the IncidentTypes table (database/schema/002_IncidentTypes.sql): Hazard, Incident and Near Miss.
+// Maps to the IncidentTypes table (database/schema/IncidentTypes.sql): Hazard, Incident and Near Miss.
 public class IncidentType
 {
     public int IncidentTypeId { get; set; }        // IncidentTypeID (primary key)

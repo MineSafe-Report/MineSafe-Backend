@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MineSafety.Api.Entities;
 
-// Maps to the ReportAuditLog table (database/schema/011_ReportAuditLog.sql):
+// Maps to the ReportAuditLog table (database/schema/ReportAuditLog.sql):
 // the history of everything that happened to a report.
 public class ReportAuditLog
 {

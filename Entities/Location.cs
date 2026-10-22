@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MineSafety.Api.Entities;
 
-// Maps to the Locations table (database/schema/004_Locations.sql).
+// Maps to the Locations table (database/schema/Locations.sql).
 public class Location
 {
     public int LocationId { get; set; }            // LocationID (primary key)

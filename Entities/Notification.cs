@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MineSafety.Api.Entities;
 
-// Maps to the Notifications table (database/schema/012_Notifications.sql): the alerts shown in the app.
+// Maps to the Notifications table (database/schema/Notifications.sql): the alerts shown in the app.
 public class Notification
 {
     public int NotificationId { get; set; }        // NotificationID (primary key)

@@ -41,7 +41,7 @@ public class AccountDto
     };
 }
 
-// Body for POST /api/accounts. The maximum lengths match database/schema/005_Accounts.sql.
+// Body for POST /api/accounts. The maximum lengths match database/schema/Accounts.sql.
 public class CreateAccountRequest
 {
     [Required, MaxLength(50)]

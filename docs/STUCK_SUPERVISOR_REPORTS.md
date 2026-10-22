@@ -4,14 +4,14 @@
 can't review their own report. Reports submitted by S2001 / S2002 at a location with no other
 supervisor could never be reviewed.
 
-**Why they can't simply all be approved:** reports created before migration 003 have no stored
+**Why they can't simply all be approved:** reports created before the AddEvidenceTracking migration have no stored
 `ExpectedImageCount` / `ExpectedVoiceNoteCount`, so the server can't tell whether some of their
 photos or voice notes are still waiting on a phone. Approving those blindly could approve a report
 whose evidence never arrived.
 
 ## Step 1: update the database
 ```powershell
-sqlcmd -S "(localdb)\MSSQLLocalDB" -E -d MineSafetyDb -b -i database/migrations/003_AddEvidenceTracking.sql
+sqlcmd -S "(localdb)\MSSQLLocalDB" -E -d MineSafetyDb -b -I -i database/migrations/AddEvidenceTracking.sql
 ```
 
 ## Step 2: look first (read-only)

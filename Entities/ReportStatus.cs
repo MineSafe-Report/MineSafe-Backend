@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MineSafety.Api.Entities;
 
-// Maps to the ReportStatuses table (database/schema/003_ReportStatuses.sql): Pending Review, Approved and Denied.
+// Maps to the ReportStatuses table (database/schema/ReportStatuses.sql): Pending Review, Approved and Denied.
 // "Pending upload" is not a status here because it only exists on the phone before the report syncs.
 public class ReportStatus
 {

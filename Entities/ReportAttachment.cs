@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace MineSafety.Api.Entities;
 
-// Maps to the ReportAttachments table (database/schema/009_ReportAttachments.sql).
+// Maps to the ReportAttachments table (database/schema/ReportAttachments.sql).
 // The file itself is saved in a folder on the server. This row stores where it is,
 // plus a hash to confirm the file arrived intact.
 public class ReportAttachment
