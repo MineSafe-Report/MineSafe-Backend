@@ -1,10 +1,7 @@
 namespace MineSafety.Api.Common;
 
-// What a service hands back to a controller: either it worked (with a value),
-// or it failed with a reason. The controller turns the reason into a status code:
-//   NotFound -> 404,  Conflict -> 409,  BadRequest -> 400,  TooLarge -> 413
-// "Code" is a short fixed word the app can check in code (e.g. "ALREADY_REVIEWED"),
-// "Message" is the human sentence to show on screen.
+// The kinds of failure a service can report. The controller maps each one to a status code:
+// NotFound = 404, Conflict = 409, BadRequest = 400, TooLarge = 413.
 public enum ServiceError
 {
     None,
@@ -14,6 +11,9 @@ public enum ServiceError
     TooLarge
 }
 
+// What a service returns to a controller: either success with a value, or a failure with a reason.
+// Code is a short fixed value the app can check (for example "ALREADY_REVIEWED"),
+// and Message is the sentence shown to the user.
 public class ServiceResult<T>
 {
     public bool Success { get; private init; }

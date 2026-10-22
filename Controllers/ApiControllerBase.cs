@@ -3,15 +3,16 @@ using MineSafety.Api.Common;
 
 namespace MineSafety.Api.Controllers;
 
-// A parent class every controller inherits from, so the shared bits are written once.
-[ApiController]   // switches on API behaviour: automatic 400 for invalid input, JSON in and out
+// Base class for every controller, so the shared helpers are only written once.
+// [ApiController] turns on automatic 400 responses for invalid input and JSON in and out.
+[ApiController]
 public abstract class ApiControllerBase : ControllerBase
 {
-    // The logged-in user's account ID, read from the "sub" claim inside their token.
+    // The logged-in user's account ID, read from the "sub" claim in their token.
     protected int CurrentAccountId => int.Parse(User.FindFirst("sub")!.Value);
 
-    // Turns a failed ServiceResult into the right HTTP status code.
-    // Every error has the same shape: { "code": "ALREADY_REVIEWED", "message": "..." }
+    // Converts a failed ServiceResult into the matching HTTP status code.
+    // Every error uses the same shape: { "code": "ALREADY_REVIEWED", "message": "..." }
     protected IActionResult ErrorResponse<T>(ServiceResult<T> result)
     {
         var body = new { code = result.Code, message = result.Message };

@@ -6,8 +6,9 @@ using MineSafety.Api.Services;
 
 namespace MineSafety.Api.Controllers;
 
-// Handles /api/safety-officer/incidents : read-only view of every Incident in the mine
-// (submitted and approved; denied incidents are left out).
+// Endpoints under /api/safety-officer/incidents, used by the mobile app.
+// A read-only view of every incident in the mine that is pending or approved (denied incidents are left out).
+// The web dashboard uses the general /api/reports endpoints instead, where a Safety Officer sees every report.
 [Route("api/safety-officer/incidents")]
 [Authorize(Roles = RoleNames.SafetyOfficer)]
 public class SafetyOfficerController : ApiControllerBase
@@ -30,12 +31,20 @@ public class SafetyOfficerController : ApiControllerBase
         return Ok(await _reports.ListAsync(user, filter));
     }
 
-    // GET /api/safety-officer/incidents/5  ->  { "report": { ..., "dashboardUrl": "..." } }
+    // GET /api/safety-officer/incidents/5
+    // Returns { "report": { ..., "dashboardUrl": "..." } }
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id)
     {
         var user = await _access.GetCurrentUserAsync(User);
         var result = await _reports.GetByIdAsync(id, user);
-        return result.Success ? Ok(new ReportEnvelope { Report = result.Value! }) : ErrorResponse(result);
+        if (!result.Success)
+            return ErrorResponse(result);
+
+        // This route only returns incidents that are pending or approved, like the list above.
+        if (result.Value!.TypeCode != "INCIDENT" || result.Value.StatusCode == "DENIED")
+            return NotFound(new { code = "NOT_FOUND", message = $"Incident {id} was not found." });
+
+        return Ok(new ReportEnvelope { Report = result.Value });
     }
 }

@@ -1,11 +1,11 @@
 namespace MineSafety.Api.Entities;
 
-// Matches database/schema/AccountRoles.sql
-// A "link" table: one row = "this account has this role".
-// Rows are switched off (IsActive = false) instead of deleted, so history is kept.
+// Maps to the AccountRoles table (database/schema/AccountRoles.sql).
+// Each row means "this account has this role". When a role is removed the row is
+// marked inactive instead of deleted, so the history is kept.
 public class AccountRole
 {
-    public int AccountRoleId { get; set; }           // AccountRoleID (PK)
+    public int AccountRoleId { get; set; }         // AccountRoleID (primary key)
 
     public int AccountId { get; set; }
     public Account Account { get; set; } = null!;
@@ -14,6 +14,6 @@ public class AccountRole
     public Role Role { get; set; } = null!;
 
     public DateTime AssignedAt { get; set; }
-    public int? AssignedBy { get; set; }             // AccountID of the admin who assigned it
+    public int? AssignedBy { get; set; }           // AccountID of the administrator who assigned it
     public bool IsActive { get; set; } = true;
 }

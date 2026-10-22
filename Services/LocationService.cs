@@ -6,12 +6,11 @@ using MineSafety.Api.Entities;
 
 namespace MineSafety.Api.Services;
 
-// The interface is the "menu" of what this service can do.
-// The controller only knows about this menu, not the class behind it,
-// so the class can change without the controller changing.
+// The controller depends on this interface rather than on LocationService itself,
+// so the implementation can change without the controller having to change.
 public interface ILocationService
 {
-    // allowedLocationIds: null = no limit, otherwise only these IDs are returned.
+    // allowedLocationIds: null means no limit, otherwise only these IDs are returned.
     Task<List<LocationDto>> GetAllAsync(bool includeInactive, string? search, List<int>? allowedLocationIds);
     Task<ServiceResult<LocationDto>> GetByIdAsync(int id);
     Task<ServiceResult<LocationDto>> CreateAsync(CreateLocationRequest request);
@@ -19,8 +18,7 @@ public interface ILocationService
     Task<ServiceResult<bool>> DeleteAsync(int id);
 }
 
-// All the rules for locations live here. This is the TEMPLATE for every other module:
-// Accounts, and later Reports, follow exactly the same shape.
+// The business rules for locations. The other services (accounts and reports) follow the same structure.
 public class LocationService : ILocationService
 {
     private readonly MineSafetyDbContext _db;
@@ -30,17 +28,18 @@ public class LocationService : ILocationService
         _db = db;
     }
 
-    // READ (list)
+    // ---------- Read ----------
+
     public async Task<List<LocationDto>> GetAllAsync(bool includeInactive, string? search, List<int>? allowedLocationIds)
     {
-        // Start with "all locations" and add filters step by step.
-        // Nothing is sent to the database until ToListAsync() at the end.
+        // Start with all locations and add the filters one by one.
+        // The query only runs against the database at ToListAsync().
         IQueryable<Location> query = _db.Locations.AsNoTracking();
 
         if (!includeInactive)
             query = query.Where(l => l.IsActive);
 
-        // Location scoping: Workers/Supervisors only get the locations assigned to them.
+        // Workers and Supervisors only get the locations assigned to them.
         if (allowedLocationIds != null)
             query = query.Where(l => allowedLocationIds.Contains(l.LocationId));
 
@@ -54,7 +53,6 @@ public class LocationService : ILocationService
         return locations.Select(LocationDto.FromEntity).ToList();
     }
 
-    // READ (one)
     public async Task<ServiceResult<LocationDto>> GetByIdAsync(int id)
     {
         var location = await _db.Locations.AsNoTracking().FirstOrDefaultAsync(l => l.LocationId == id);
@@ -64,12 +62,13 @@ public class LocationService : ILocationService
             : ServiceResult<LocationDto>.Ok(LocationDto.FromEntity(location));
     }
 
-    // CREATE
+    // ---------- Create ----------
+
     public async Task<ServiceResult<LocationDto>> CreateAsync(CreateLocationRequest request)
     {
         var code = request.LocationCode.Trim().ToUpper();
 
-        // Business rule: location codes must be unique.
+        // Location codes must be unique.
         if (await _db.Locations.AnyAsync(l => l.LocationCode == code))
             return ServiceResult<LocationDto>.Conflict($"Location code '{code}' is already in use.");
 
@@ -82,16 +81,17 @@ public class LocationService : ILocationService
             CreatedAt = DateTime.UtcNow
         };
 
-        _db.Locations.Add(location);       // tell EF about the new row
-        await _db.SaveChangesAsync();      // EF writes the INSERT; SQL Server fills in LocationId
+        _db.Locations.Add(location);
+        await _db.SaveChangesAsync(); // SQL Server generates the LocationId here
 
         return ServiceResult<LocationDto>.Ok(LocationDto.FromEntity(location));
     }
 
-    // UPDATE
+    // ---------- Update ----------
+
     public async Task<ServiceResult<LocationDto>> UpdateAsync(int id, UpdateLocationRequest request)
     {
-        // No AsNoTracking here: we WANT EF to track this row so it notices our changes.
+        // No AsNoTracking here, because EF needs to track this row to detect the changes.
         var location = await _db.Locations.FirstOrDefaultAsync(l => l.LocationId == id);
         if (location == null)
             return ServiceResult<LocationDto>.NotFound($"Location {id} was not found.");
@@ -106,13 +106,15 @@ public class LocationService : ILocationService
         location.IsActive = request.IsActive;
         location.UpdatedAt = DateTime.UtcNow;
 
-        await _db.SaveChangesAsync();      // EF sees which properties changed and writes the UPDATE
+        await _db.SaveChangesAsync(); // EF only updates the columns that changed
 
         return ServiceResult<LocationDto>.Ok(LocationDto.FromEntity(location));
     }
 
-    // DELETE (soft): D3 says old reports must keep their location, so we switch it off instead.
-    // It disappears from the worker's dropdown but every old report still points to it.
+    // ---------- Delete (soft) ----------
+
+    // Old reports must keep their location, so it is deactivated instead of deleted.
+    // It disappears from the location dropdown, but existing reports still point to it.
     public async Task<ServiceResult<bool>> DeleteAsync(int id)
     {
         var location = await _db.Locations.FirstOrDefaultAsync(l => l.LocationId == id);

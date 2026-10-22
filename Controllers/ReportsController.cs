@@ -6,10 +6,8 @@ using MineSafety.Api.Services;
 
 namespace MineSafety.Api.Controllers;
 
-// Handles /api/reports : submitting reports and the worker's own views.
-// Same receptionist pattern as LocationsController: work out who's asking, hand the request
-// to ReportService, turn the result into a status code. The rules live in the service.
-// Supervisor routes: SupervisorController. Safety Officer routes: SafetyOfficerController.
+// Endpoints under /api/reports: submitting reports and viewing your own.
+// Supervisor endpoints are in SupervisorController and Safety Officer endpoints in SafetyOfficerController.
 [Route("api/reports")]
 [Authorize]
 public class ReportsController : ApiControllerBase
@@ -23,10 +21,11 @@ public class ReportsController : ApiControllerBase
         _access = access;
     }
 
-    // POST /api/reports        (the "Submit Report" button, or the phone syncing after being offline)
-    // 201 = new report saved.  200 = we already had this one (a retry), here it is again.
+    // POST /api/reports
+    // Called when a report is submitted, or when the phone syncs after being offline.
+    // 201 = new report saved, 200 = this report was already received (a retry).
     [HttpPost]
-    [Authorize(Roles = RoleNames.Worker + "," + RoleNames.Supervisor)]   // comma = either role
+    [Authorize(Roles = RoleNames.Worker + "," + RoleNames.Supervisor)] // either role may submit
     public async Task<IActionResult> Submit(CreateReportRequest request)
     {
         var user = await _access.GetCurrentUserAsync(User);
@@ -40,8 +39,8 @@ public class ReportsController : ApiControllerBase
         return CreatedAtAction(nameof(GetById), new { id = result.Value.Report.ReportId }, result.Value);
     }
 
-    // GET /api/reports/mine?status=PENDING_REVIEW&page=1&pageSize=20     ("My Reports")
-    // (/api/reports/my also works)
+    // GET /api/reports/mine?status=PENDING_REVIEW&page=1&pageSize=20
+    // The "My Reports" screen. /api/reports/my works as well.
     [HttpGet("mine")]
     [HttpGet("my")]
     public async Task<IActionResult> Mine([FromQuery] ReportListFilter filter)
@@ -51,7 +50,8 @@ public class ReportsController : ApiControllerBase
         return Ok(await _reports.ListAsync(user, filter));
     }
 
-    // GET /api/reports  : every report you're allowed to see, with filters
+    // GET /api/reports
+    // Every report you are allowed to see, with optional filters.
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] ReportListFilter filter)
     {
@@ -59,7 +59,8 @@ public class ReportsController : ApiControllerBase
         return Ok(await _reports.ListAsync(user, filter));
     }
 
-    // GET /api/reports/5   ->  { "report": { ... } }
+    // GET /api/reports/5
+    // Returns { "report": { ... } }
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id)
     {
@@ -68,7 +69,8 @@ public class ReportsController : ApiControllerBase
         return result.Success ? Ok(new ReportEnvelope { Report = result.Value! }) : ErrorResponse(result);
     }
 
-    // PUT /api/reports/5      (fix your own report while it's still Pending Review)
+    // PUT /api/reports/5
+    // The reporter can edit their own report while it is still Pending Review.
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, UpdateReportRequest request)
     {
@@ -77,7 +79,8 @@ public class ReportsController : ApiControllerBase
         return result.Success ? Ok(new ReportEnvelope { Report = result.Value! }) : ErrorResponse(result);
     }
 
-    // DELETE /api/reports/5   (withdraw = soft delete, same rule as editing)
+    // DELETE /api/reports/5
+    // Withdraws the report (soft delete). Same rule as editing.
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Withdraw(int id)
     {
@@ -86,7 +89,8 @@ public class ReportsController : ApiControllerBase
         return result.Success ? NoContent() : ErrorResponse(result);
     }
 
-    // GET /api/reports/5/audit        (the Safety Officer's "View Audit Log")
+    // GET /api/reports/5/audit
+    // The Safety Officer's audit log view.
     [HttpGet("{id:int}/audit")]
     [Authorize(Roles = RoleNames.SafetyOfficer)]
     public async Task<IActionResult> Audit(int id)

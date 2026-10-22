@@ -11,7 +11,7 @@ public interface ILookupService
     Task<List<ReportStatusDto>> GetReportStatusesAsync();
 }
 
-// Small read-only lists the app needs for its buttons and filters.
+// Small read-only lists used for the app's buttons and filters.
 public class LookupService : ILookupService
 {
     private readonly MineSafetyDbContext _db;

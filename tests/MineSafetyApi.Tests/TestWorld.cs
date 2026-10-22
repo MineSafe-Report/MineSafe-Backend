@@ -11,8 +11,8 @@ using MineSafety.Api.Services;
 
 namespace MineSafety.Api.Tests;
 
-// A fresh, isolated "world" per test: an in-memory database with the normal development
-// test data (DbSeeder) plus the real ReportService and AttachmentService.
+// Sets up a fresh, isolated environment for each test: an in-memory database filled with the
+// normal development test data (DbSeeder), plus the real ReportService and AttachmentService.
 public sealed class TestWorld : IDisposable
 {
     public MineSafetyDbContext Db { get; }
@@ -24,17 +24,24 @@ public sealed class TestWorld : IDisposable
     {
         var options = new DbContextOptionsBuilder<MineSafetyDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
-            // The in-memory database has no real transactions; that's fine for these tests.
+            // The in-memory database doesn't support transactions, which is fine for these tests.
             .ConfigureWarnings(w => w.Ignore(InMemoryEventId.TransactionIgnoredWarning))
             .Options;
         Db = new MineSafetyDbContext(options);
         DbSeeder.Seed(Db);
 
-        // A second supervisor at Tunnel 7 / Stope 12B, so S2001's reports have a possible reviewer.
+        // A second supervisor at Tunnel 7, so there is someone who can review S2001's reports.
         var supervisorRole = Db.Roles.Single(r => r.RoleName == RoleNames.Supervisor).RoleId;
         var tunnel7 = Db.Locations.Single(l => l.LocationCode == "T-7").LocationId;
-        var s2003 = new Account { WorkerId = "S2003", FullName = "Second Supervisor", Email = "s3@mine.test",
-                                  PasswordHash = "x", IsActive = true, CreatedAt = DateTime.UtcNow };
+        var s2003 = new Account
+        {
+            WorkerId = "S2003",
+            FullName = "Second Supervisor",
+            Email = "s3@mine.test",
+            PasswordHash = "x",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        };
         s2003.AccountRoles.Add(new AccountRole { RoleId = supervisorRole, AssignedAt = DateTime.UtcNow, IsActive = true });
         s2003.AccountLocations.Add(new AccountLocation { LocationId = tunnel7, IsDefault = true, AssignedAt = DateTime.UtcNow, IsActive = true });
         Db.Accounts.Add(s2003);
@@ -55,7 +62,7 @@ public sealed class TestWorld : IDisposable
 
     public int LocationId(string code) => Db.Locations.Single(l => l.LocationCode == code).LocationId;
 
-    // The same CurrentUser the API builds from a token: current roles + allowed locations.
+    // Builds the same CurrentUser the API creates from a token: current roles and allowed locations.
     public CurrentUser User(string workerId)
     {
         var account = Db.Accounts.Single(a => a.WorkerId == workerId);
@@ -85,7 +92,7 @@ public sealed class TestWorld : IDisposable
     public void Dispose()
     {
         Db.Dispose();
-        try { Directory.Delete(_uploadFolder, recursive: true); } catch { /* temp folder */ }
+        try { Directory.Delete(_uploadFolder, recursive: true); } catch { /* only a temp folder, safe to ignore */ }
     }
 
     private sealed class FakeEnvironment : IWebHostEnvironment

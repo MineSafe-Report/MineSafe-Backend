@@ -6,8 +6,8 @@ using MineSafety.Api.Services;
 
 namespace MineSafety.Api.Controllers;
 
-// Handles /api/supervisor/reports : the supervisor's screens.
-// Only reports at the supervisor's assigned locations, never their own.
+// Endpoints under /api/supervisor/reports, used by the supervisor screens.
+// Supervisors only see reports at their assigned locations, and never their own.
 [Route("api/supervisor/reports")]
 [Authorize(Roles = RoleNames.Supervisor)]
 public class SupervisorController : ApiControllerBase
@@ -21,7 +21,8 @@ public class SupervisorController : ApiControllerBase
         _access = access;
     }
 
-    // GET /api/supervisor/reports?status=PENDING_REVIEW   ("Reports Waiting For Review", urgent first)
+    // GET /api/supervisor/reports?status=PENDING_REVIEW
+    // The review queue, with urgent reports first.
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] ReportListFilter filter)
     {
@@ -30,7 +31,8 @@ public class SupervisorController : ApiControllerBase
         return Ok(await _reports.ListAsync(user, filter));
     }
 
-    // GET /api/supervisor/reports/5   ->  { "report": { ... } }
+    // GET /api/supervisor/reports/5
+    // Returns { "report": { ... } }
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id)
     {
@@ -40,8 +42,8 @@ public class SupervisorController : ApiControllerBase
     }
 
     // POST /api/supervisor/reports/5/review
-    // body: { "decision": "APPROVE" }   or   { "decision": "DENY", "reason": "why" }
-    // 200 { "report": ... } | 400 REASON_REQUIRED | 404 | 409 ALREADY_REVIEWED
+    // Body: { "decision": "APPROVE" } or { "decision": "DENY", "reason": "..." }
+    // Returns 200 with the report, 400 REASON_REQUIRED, 404, or 409 ALREADY_REVIEWED.
     [HttpPost("{id:int}/review")]
     public async Task<IActionResult> Review(int id, CreateReviewRequest request)
     {

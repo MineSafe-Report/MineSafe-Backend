@@ -1,14 +1,13 @@
 namespace MineSafety.Api.Common;
 
-// Everything a service needs to know about WHO is asking, in one small object:
-// their account ID, their current roles, and which locations they may see.
-// Built once per request by AccessService.GetCurrentUserAsync.
+// Who is making the request: their account ID, their current roles and the locations they may see.
+// Built once per request by AccessService.GetCurrentUserAsync and passed to the services.
 public class CurrentUser
 {
     public int AccountId { get; init; }
     public List<string> Roles { get; init; } = new();
 
-    // null = may see every location (Safety Officer, Administrator)
+    // Null means the user may see every location (Safety Officer and Administrator).
     public List<int>? AllowedLocationIds { get; init; }
 
     public bool IsInRole(string role) => Roles.Contains(role);
