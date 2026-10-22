@@ -24,7 +24,8 @@ public class NotificationsController : ApiControllerBase
         return Ok(await _notifications.GetMineAsync(CurrentAccountId, unreadOnly, page, pageSize));
     }
 
-    // PUT /api/notifications/5/read
+    // POST (or PUT) /api/notifications/5/read
+    [HttpPost("{id:int}/read")]
     [HttpPut("{id:int}/read")]
     public async Task<IActionResult> MarkRead(int id)
     {
@@ -32,7 +33,8 @@ public class NotificationsController : ApiControllerBase
         return result.Success ? Ok(result.Value) : ErrorResponse(result);
     }
 
-    // PUT /api/notifications/read-all
+    // POST (or PUT) /api/notifications/read-all
+    [HttpPost("read-all")]
     [HttpPut("read-all")]
     public async Task<IActionResult> MarkAllRead()
     {

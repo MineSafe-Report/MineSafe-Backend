@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using MineSafety.Api.Common;
 using MineSafety.Api.Data;
 using MineSafety.Api.Dtos;
 
@@ -27,6 +28,7 @@ public class LookupService : ILookupService
         return types.Select(t => new IncidentTypeDto
         {
             IncidentTypeId = t.IncidentTypeId,
+            TypeCode = Codes.From(t.TypeName),
             TypeName = t.TypeName,
             TriggersImmediateAlert = t.TriggersImmediateAlert
         }).ToList();
@@ -38,6 +40,7 @@ public class LookupService : ILookupService
         return statuses.Select(s => new ReportStatusDto
         {
             StatusId = s.StatusId,
+            StatusCode = Codes.From(s.StatusName),
             StatusName = s.StatusName,
             IsTerminal = s.IsTerminal
         }).ToList();

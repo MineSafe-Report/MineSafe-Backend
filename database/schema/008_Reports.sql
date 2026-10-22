@@ -8,6 +8,8 @@ CREATE TABLE Reports (
     StatusID INT NOT NULL,
     Description NVARCHAR(MAX) NOT NULL,
     OccurredAt DATETIME2(0) NOT NULL,
+    ExpectedImageCount INT NULL,
+    ExpectedVoiceNoteCount INT NULL,
     IsActive BIT NOT NULL
         CONSTRAINT DF_Reports_IsActive DEFAULT (1),
     CreatedAt DATETIME2(0) NOT NULL
@@ -22,7 +24,11 @@ CREATE TABLE Reports (
     CONSTRAINT FK_Reports_Accounts FOREIGN KEY (ReporterAccountID) REFERENCES Accounts(AccountID),
     CONSTRAINT FK_Reports_IncidentTypes FOREIGN KEY (IncidentTypeID) REFERENCES IncidentTypes(IncidentTypeID),
     CONSTRAINT FK_Reports_Locations FOREIGN KEY (LocationID) REFERENCES Locations(LocationID),
-    CONSTRAINT FK_Reports_ReportStatuses FOREIGN KEY (StatusID) REFERENCES ReportStatuses(StatusID)
+    CONSTRAINT FK_Reports_ReportStatuses FOREIGN KEY (StatusID) REFERENCES ReportStatuses(StatusID),
+    CONSTRAINT CK_Reports_ExpectedEvidenceCounts CHECK (
+        (ExpectedImageCount IS NULL OR ExpectedImageCount >= 0)
+        AND (ExpectedVoiceNoteCount IS NULL OR ExpectedVoiceNoteCount >= 0)
+    )
 );
 
 CREATE INDEX IX_Reports_ReporterAccountID

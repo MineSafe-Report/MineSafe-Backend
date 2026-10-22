@@ -178,3 +178,12 @@ Do not point creation scripts or transaction tests at production. Back up any pe
 - Notification types are not constrained because the set may grow with API behavior.
 
 The API developer should not use `EnsureCreated` as a replacement for executing the authoritative SQL schema and ordered migrations against shared environments.
+
+## Migration 003: evidence tracking (21 Oct, proposed by Rikus for review)
+
+`003_AddEvidenceTracking.sql` adds `Reports.ExpectedImageCount`, `Reports.ExpectedVoiceNoteCount`
+(INT NULL, >= 0) and `ReportAttachments.ClientAttachmentId` (NVARCHAR(100) NULL, unique per report
+where not NULL). Fresh databases get the same columns from the updated `schema/008` and
+`schema/009`. The API uses them for supervisor auto-approval and safe upload retries. Existing rows
+keep NULL (= "unknown", reports from before tracking). Idempotent; run it on existing databases
+before starting the new API.
